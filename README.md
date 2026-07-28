@@ -144,6 +144,37 @@ AI-generated code is not trustworthy merely because it compiles. Teams need to k
 
 Sessions turns AI software execution into an inspectable engineering system rather than an opaque conversation.
 
+## GitHub Developer Program and integration roadmap
+
+Charles Castillo is registered in the **GitHub Developer Program**, with Sessions identified as the product associated with the integration effort.
+
+Sessions is being positioned for a genuine GitHub integration centered on:
+
+- repository authorization and controlled access;
+- branches, commits, pull requests, and repository-state ingestion;
+- GitHub webhook event processing;
+- validation evidence and status reporting;
+- execution history linked to repository changes;
+- release and deployment-state visibility;
+- replay, recovery, and rollback context;
+- auditable GitHub-to-Sessions activity records.
+
+The intended production integration will use a dedicated **Sessions GitHub App** rather than treating personal access tokens as the primary product authorization model.
+
+```text
+GitHub repository authorized
+    -> repository state imported
+    -> commits and pull requests linked to Sessions
+    -> webhook events enter the execution timeline
+    -> validation and verification evidence recorded
+    -> release status approved or blocked
+    -> deployment, recovery, or rollback history preserved
+```
+
+After this workflow is functional and publicly demonstrable or testable, the integration can be submitted through GitHub's program integration channel.
+
+GitHub Developer Program membership is a professional integration credential and development relationship. It does not represent GitHub certification, endorsement, or approval of Sessions.
+
 ## Repository boundary
 
 This public repository is the controlled product and technical documentation surface for Sessions. Proprietary production source, internal execution contracts, security-sensitive implementation details, and commercial deployment assets are not published here.
