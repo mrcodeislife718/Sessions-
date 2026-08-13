@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 
 const [, , command, ...args] = process.argv;
 const api = process.env.SESSIONS_API_URL ?? "http://localhost:4000";
 const stateDir = join(process.cwd(), ".sessions");
 const stateFile = join(stateDir, "state.json");
+const ignored = new Set([".git", ".sessions", "node_modules", ".next", "dist", "coverage"]);
 
 type LocalState = { sessionId?: string; repositoryId?: string };
+type SnapshotEntry = { path: string; contentHash: string; size: number };
 
 async function loadState(): Promise<LocalState> {
   try { return JSON.parse(await readFile(stateFile, "utf8")); } catch { return {}; }
@@ -27,8 +30,22 @@ function requireSession(state: LocalState): string {
   if (!state.sessionId) throw new Error("No active Session. Run: sessions start <objective>");
   return state.sessionId;
 }
+async function captureTree(root: string, dir = root): Promise<SnapshotEntry[]> {
+  const entries: SnapshotEntry[] = [];
+  for (const name of await readdir(dir)) {
+    if (ignored.has(name)) continue;
+    const absolute = join(dir, name);
+    const info = await stat(absolute);
+    if (info.isDirectory()) entries.push(...await captureTree(root, absolute));
+    else if (info.isFile()) {
+      const content = await readFile(absolute);
+      entries.push({ path: relative(root, absolute).replaceAll("\\", "/"), contentHash: createHash("sha256").update(content).digest("hex"), size: info.size });
+    }
+  }
+  return entries.sort((a, b) => a.path.localeCompare(b.path));
+}
 
-const help = `Sessions CLI\n\nCommands:\n  init [repository-id]\n  start <objective>\n  checkpoint <path:hash:size>...\n  verify <kind> <passed|failed|requires_review> <summary>\n  timeline\n  replay\n  rollback <snapshot-id>\n  status\n`;
+const help = `Sessions CLI\n\nCommands:\n  init [repository-id]\n  start <objective>\n  record <EventType> [message]\n  checkpoint\n  verify <kind> <passed|failed|requires_review> <summary>\n  timeline\n  replay\n  rollback <snapshot-id>\n  status\n`;
 
 async function main() {
   const state = await loadState();
@@ -48,14 +65,18 @@ async function main() {
       console.log(`${created.session.id}\n${objective}`);
       return;
     }
+    case "record": {
+      const sessionId = requireSession(state);
+      const [type, ...message] = args;
+      if (!type) throw new Error("Usage: sessions record <EventType> [message]");
+      console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/events`, { method: "POST", body: JSON.stringify({ type, payload: { message: message.join(" ") } }) }), null, 2));
+      return;
+    }
     case "checkpoint": {
       const sessionId = requireSession(state);
-      const entries = args.map((item) => {
-        const [path, contentHash, size = "0"] = item.split(":");
-        return { path, contentHash, size: Number(size) };
-      });
+      const entries = await captureTree(process.cwd());
       const snapshot = await request(`/api/sessions/${sessionId}/snapshots`, { method: "POST", body: JSON.stringify({ entries }) });
-      console.log(JSON.stringify(snapshot, null, 2));
+      console.log(`${snapshot.id}\n${entries.length} files captured\n${snapshot.digest}`);
       return;
     }
     case "verify": {
@@ -84,8 +105,7 @@ async function main() {
       console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/rollback`, { method: "POST", body: JSON.stringify({ snapshotId }) }), null, 2));
       return;
     }
-    default:
-      console.log(help);
+    default: console.log(help);
   }
 }
 
