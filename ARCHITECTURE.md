@@ -2,13 +2,98 @@
 
 ## Purpose
 
-Sessions is AI-native source control and execution infrastructure for AI systems, AI agents, and humans.
+Sessions is a native software development platform for AI systems, AI agents, and humans.
 
-The architecture treats software change as an attributable execution process rather than only a file diff.
+The architecture combines three independent first-class layers:
+
+```text
+SESSIONS
+├── Source Control
+├── Collaboration
+└── Intelligence
+```
+
+Sessions owns its repository model, history model, collaboration model, execution model, verification model, recovery model, and deployment model.
+
+## Native source-control model
+
+### Repository
+
+The Repository is the durable container for source objects, Workstreams, Checkpoints, history, reviews, verification, releases, deployment state, and execution lineage.
+
+### Workstream
+
+A Workstream is a purpose-oriented line of development tied to an objective. It owns a current head Checkpoint and can evolve independently until integration.
+
+### Checkpoint
+
+A Checkpoint is an immutable meaningful software state.
+
+```text
+Checkpoint
+├── id
+├── friendlyName
+├── repositoryId
+├── workstreamId
+├── parentCheckpointIds[]
+├── sourceManifest
+├── sourceDigest
+├── semanticSummary
+├── objectiveId
+├── actors[]
+├── executionRefs[]
+├── verificationRefs[]
+├── risk
+├── lifecycle
+├── createdAt
+└── recoveryMetadata
+```
+
+Checkpoint lifecycle:
+
+```text
+Draft → Verified → Reviewed → Approved → Published
+```
+
+### Change Review
+
+A Change Review combines source differences, semantic changes, objective, actors, verification evidence, risk, approvals, and recovery readiness.
+
+### Integrate
+
+Integration combines qualified Workstreams while checking source conflicts, semantic conflicts, overlapping work, verification gates, authority requirements, and recovery readiness.
+
+### Publish and Sync
+
+Publication and synchronization exchange native repository objects, Checkpoint graphs, Workstream heads, and integrity metadata between Sessions installations.
+
+The synchronization layer must support missing-object negotiation, resumable transfer, concurrent-update detection, offline reconciliation, and independent integrity verification.
+
+## Repository object model
+
+```text
+Repository
+├── metadata
+├── objects/
+│   ├── source blobs
+│   ├── manifests
+│   └── semantic objects
+├── workstreams/
+├── checkpoints/
+├── reviews/
+├── verification/
+├── sessions/
+├── releases/
+└── state
+```
+
+Local metadata lives under `.sessions/` and is owned exclusively by Sessions.
+
+Content-addressed objects are immutable. Human-readable names are references, not integrity identities.
 
 ## Actor model
 
-Every consequential action has an actor.
+Every consequential action has an attributable actor.
 
 Supported actor kinds:
 
@@ -17,11 +102,11 @@ Supported actor kinds:
 - `ai_system`
 - `service`
 
-An actor record contains a stable ID, display name, kind, optional provider/model metadata, and optional parent actor. Parent relationships allow a larger AI system to coordinate child agents without erasing lineage.
+Actor authority is capability-scoped. Identity never automatically implies permission.
 
 ## Event envelope
 
-All core engines communicate through a common event envelope:
+All engines communicate through a common event envelope:
 
 ```text
 Event
@@ -31,32 +116,36 @@ Event
 ├── workspaceId
 ├── projectId
 ├── repositoryId
+├── workstreamId
 ├── sessionId
+├── checkpointId
 ├── actor
 ├── correlationId
 ├── causationId
 └── payload
 ```
 
-`correlationId` groups activity belonging to the same higher-level operation. `causationId` links an event to the event that directly caused it.
-
 ## Core engines
+
+### Native Repository Engine
+
+Owns repository creation, source objects, manifests, Workstreams, Checkpoint graph, status, change detection, diffs, integration, publication, synchronization, and local repository state.
 
 ### CodeVault
 
-Owns immutable snapshot manifests, content digests, checkpoint identities, reconstruction inputs, and rollback targets.
+Owns immutable content-addressed state, digests, reconstruction inputs, integrity verification, and recovery targets.
 
-### Timeline
+### Timeline Engine
 
-Stores ordered execution events and provides reconstruction views. Timeline is append-oriented. Corrections create new events rather than mutating critical history.
+Stores ordered execution and development events and provides reconstruction, activity, progress, and replay views.
 
-### Verification
+### Verification Engine
 
-Produces structured evidence from lint, typecheck, tests, builds, security hooks, policy checks, and future verification adapters.
+Produces structured evidence from lint, type checks, tests, builds, security, policy, approvals, and future verification adapters.
 
 ### Semantic Engine
 
-Adds system-level interpretation: components, dependencies, architectural intent, affected areas, risk, and semantic relationships.
+Adds system-level interpretation: affected components, dependencies, architectural intent, behavioral impact, risk, semantic change, and semantic conflict analysis.
 
 ### Memory Graph
 
@@ -64,65 +153,80 @@ Promotes qualified engineering knowledge from execution history into durable mem
 
 ### Execution Runtime
 
-Coordinates human actions, AI systems, AI agents, services, tool calls, commands, approvals, and budgets while preserving authority boundaries.
+Coordinates humans, AI systems, AI agents, services, tools, commands, approvals, authority, and execution budgets.
+
+### Collaboration Platform
+
+Owns organizations, teams, hosted repositories, Work Items, Change Reviews, approvals, activity, notifications, search, audit, identity, packages, releases, and dashboards.
 
 ### Deployment Runtime
 
-Binds verified snapshots to environments, releases, health checks, rollback targets, and post-deployment evidence.
+Binds qualified Checkpoints and releases to environments, deployment events, health checks, recovery targets, and post-deployment evidence.
 
-## Data flow
+## Canonical data flow
 
 ```text
-Actor starts Session
+Actor defines Goal
     ↓
-SessionStarted event
+Workstream created or selected
     ↓
-Repository baseline captured by CodeVault
+Session begins
     ↓
-SnapshotCreated event
+Human / AI System / AI Agent execution
     ↓
-Human / AI System / AI Agent activity
+Source changes detected
     ↓
-Tool/command/change events
+Checkpoint created
     ↓
-Verification run
+Verification evidence attached
     ↓
-Verification evidence events
+Change Review
     ↓
-Timeline finalized
+Integrate
     ↓
-Deployment approved or blocked
+Publish / Sync
     ↓
-Replay / Recovery / Rollback available
+Release / Deploy
+    ↓
+Replay / Recovery / Restore
 ```
+
+## Progress architecture
+
+Progress is derived from observable state, not invented percentages.
+
+Progress signals include:
+
+- objective state;
+- Workstream milestones;
+- Session events;
+- actor contributions;
+- Checkpoint creation;
+- verification completion;
+- review state;
+- integration state;
+- publication state;
+- release state;
+- deployment state;
+- recovery readiness.
 
 ## Integrity
 
-Snapshots use canonical JSON plus SHA-256 digests. Content-addressed objects should be immutable. Reconstructed state must be re-hashed before Sessions declares restoration successful.
+Source objects and Checkpoints use cryptographic content digests. Reconstructed state must be independently hashed before Sessions declares restoration successful.
 
 ## Replay semantics
 
 Sessions distinguishes:
 
-1. **timeline replay** — re-reading the recorded event sequence;
-2. **state reconstruction** — rebuilding a repository/software state from immutable recorded inputs;
-3. **action replay** — re-running deterministic system operations where safe and authorized;
-4. **model re-execution** — invoking an AI model again, which is not assumed to produce identical reasoning or output.
-
-This distinction prevents false claims of deterministic AI reasoning replay.
+1. timeline replay;
+2. state reconstruction;
+3. deterministic action replay where safe;
+4. AI-model re-execution, which is not assumed to reproduce identical internal reasoning.
 
 ## Trust boundary
 
-Persisted AI-generated state is data, not automatically trusted instruction. Provenance and authenticity are necessary but do not imply current authority. Stored state must be re-authorized when consumed in a consequential workflow.
+Persisted AI-generated state is data, not automatically trusted instruction. Provenance and authenticity do not imply authority. Consequential use requires current authorization and policy evaluation.
 
-## Initial package boundaries
+## Developer-experience rule
 
-```text
-packages/
-├── shared/              # actor IDs, event envelope, canonical utilities
-├── codevault-core/      # immutable snapshot primitives
-├── timeline-engine/     # ordered event capture and reconstruction
-└── verification-engine/ # structured verification evidence
-```
-
-These packages are intentionally dependency-light. Hosted services, persistence adapters, queues, UI, and model providers are layered on top rather than embedded into the primitives.
+Sessions should infer bookkeeping wherever it can do so safely. The platform should expose intent and outcomes first, with low-level implementation detail available through progressive disclosure.
