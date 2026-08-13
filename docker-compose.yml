@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sessions
+      POSTGRES_PASSWORD: sessions
+      POSTGRES_DB: sessions
+    volumes:
+      - sessions_postgres:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sessions -d sessions"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - sessions_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-sessions}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-sessions-local-secret}
+    volumes:
+      - sessions_minio:/data
+    ports:
+      - "9001:9001"
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.api
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgresql://sessions:sessions@postgres:5432/sessions
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: sessions
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  runner:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.runner
+    environment:
+      DATABASE_URL: postgresql://sessions:sessions@postgres:5432/sessions
+      REDIS_URL: redis://redis:6379
+      RUNNER_POLL_MS: 2000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.web
+    environment:
+      NEXT_PUBLIC_SESSIONS_API_URL: ${NEXT_PUBLIC_SESSIONS_API_URL:-http://localhost:4000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  sessions_postgres:
+  sessions_redis:
+  sessions_minio:
