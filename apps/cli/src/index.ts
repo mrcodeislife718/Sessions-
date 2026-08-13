@@ -6,11 +6,15 @@ import {
   createCheckpoint,
   createWorkstream,
   getActiveWorkstream,
+  getSourceManifest,
   initializeRepository,
   listHistory,
   listWorkstreams,
   openRepository,
+  previewRestore,
+  repositoryDiff,
   repositoryStatus,
+  restoreCheckpoint,
   switchWorkstream,
 } from "@sessions/native-repository";
 
@@ -43,16 +47,31 @@ function requireSession(state: RuntimeState): string {
   return state.sessionId;
 }
 
+function printChanges(changes: Awaited<ReturnType<typeof repositoryDiff>>) {
+  if (!changes.length) {
+    console.log("Clean — no source changes.");
+    return;
+  }
+  for (const change of changes) {
+    const marker = change.kind === "added" ? "+" : change.kind === "removed" ? "-" : "~";
+    console.log(`${marker} ${change.path}`);
+  }
+}
+
 const help = `Sessions CLI
 
 Native source control:
   init [name]
   status
+  work <objective>
   workstream list
   workstream create <name> [objective]
-  workstream switch <workstream-id>
+  workstream switch <name-or-id>
+  switch <name-or-id>
   checkpoint <name>
   history
+  diff
+  restore <checkpoint-name-or-id> [--apply]
 
 Execution + intelligence:
   start <objective>
@@ -60,7 +79,7 @@ Execution + intelligence:
   verify <kind> <passed|failed|requires_review> <summary>
   timeline
   replay
-  rollback <checkpoint-id>
+  recovery <checkpoint-id>
 `;
 
 async function main() {
@@ -76,7 +95,26 @@ async function main() {
     case "status": {
       const status = await repositoryStatus(root);
       const session = runtime.sessionId ? await request(`/api/sessions/${runtime.sessionId}`).catch(() => null) : null;
-      console.log(JSON.stringify({ repository: status, activeSession: session }, null, 2));
+      console.log(`${status.repository.name}\n`);
+      console.log(`Workstream  ${status.workstream.name}`);
+      console.log(`Head        ${status.headCheckpoint?.friendlyName ?? "No checkpoint"}`);
+      console.log(`State       ${status.clean ? "Clean" : `${status.changes.length} change(s)`}`);
+      console.log(`Session     ${session ? "Active" : "None"}`);
+      if (!status.clean) {
+        console.log("\nChanges");
+        printChanges(status.changes);
+      }
+      return;
+    }
+
+    case "work": {
+      const objective = args.join(" ").trim();
+      if (!objective) throw new Error("Usage: sessions work <objective>");
+      const current = await getActiveWorkstream(root);
+      const slug = objective.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || `work-${Date.now()}`;
+      const created = await createWorkstream(root, { name: slug, objective, fromCheckpointId: current.headCheckpointId });
+      await switchWorkstream(root, created.id);
+      console.log(`Workstream ${created.name}\nObjective: ${objective}\n${created.id}`);
       return;
     }
 
@@ -85,7 +123,7 @@ async function main() {
       if (action === "list") {
         const active = await getActiveWorkstream(root);
         const workstreams = await listWorkstreams(root);
-        console.log(JSON.stringify(workstreams.map((item) => ({ ...item, active: item.id === active.id })), null, 2));
+        for (const item of workstreams) console.log(`${item.id === active.id ? "●" : "○"} ${item.name}${item.objective ? ` — ${item.objective}` : ""}`);
         return;
       }
       if (action === "create") {
@@ -97,39 +135,65 @@ async function main() {
         return;
       }
       if (action === "switch") {
-        if (!value) throw new Error("Usage: sessions workstream switch <workstream-id>");
-        await switchWorkstream(root, value);
-        const active = await getActiveWorkstream(root);
+        if (!value) throw new Error("Usage: sessions workstream switch <name-or-id>");
+        const active = await switchWorkstream(root, value);
         console.log(`Active Workstream: ${active.name}\n${active.id}`);
         return;
       }
       throw new Error("Usage: sessions workstream <list|create|switch>");
     }
 
+    case "switch": {
+      const reference = args.join(" ").trim();
+      if (!reference) throw new Error("Usage: sessions switch <name-or-id>");
+      const active = await switchWorkstream(root, reference);
+      console.log(`Active Workstream: ${active.name}\n${active.id}`);
+      return;
+    }
+
     case "checkpoint": {
       const friendlyName = args.join(" ").trim();
       if (!friendlyName) throw new Error("Usage: sessions checkpoint <name>");
-      const checkpoint = await createCheckpoint(root, { friendlyName });
+      const checkpoint = await createCheckpoint(root, { friendlyName, sessionIds: runtime.sessionId ? [runtime.sessionId] : [] });
       let hostedSnapshotId: string | undefined;
       if (runtime.sessionId) {
+        const manifest = await getSourceManifest(root, checkpoint.sourceManifestId);
         const hosted = await request(`/api/sessions/${runtime.sessionId}/snapshots`, {
           method: "POST",
-          body: JSON.stringify({
-            entries: checkpoint.entries.map((entry) => ({ path: entry.path, contentHash: entry.digest, size: entry.size })),
-          }),
+          body: JSON.stringify({ entries: manifest.entries.map((entry) => ({ path: entry.path, contentHash: entry.digest, size: entry.size })) }),
         });
         hostedSnapshotId = hosted.id;
-        await saveRuntime({
-          ...runtime,
-          checkpointSnapshots: { ...(runtime.checkpointSnapshots ?? {}), [checkpoint.id]: hosted.id },
-        });
+        await saveRuntime({ ...runtime, checkpointSnapshots: { ...(runtime.checkpointSnapshots ?? {}), [checkpoint.id]: hosted.id } });
       }
-      console.log(JSON.stringify({ ...checkpoint, hostedSnapshotId }, null, 2));
+      console.log(`◆ ${checkpoint.friendlyName}\n${checkpoint.id}\n${checkpoint.sourceDigest}\nRecovery: verified${hostedSnapshotId ? `\nHosted recovery: ${hostedSnapshotId}` : ""}`);
       return;
     }
 
     case "history": {
-      console.log(JSON.stringify(await listHistory(root), null, 2));
+      const history = await listHistory(root);
+      if (!history.length) return console.log("No Checkpoints yet.");
+      for (const checkpoint of history) {
+        console.log(`◆ ${checkpoint.friendlyName}\n  ${checkpoint.id}  ${checkpoint.lifecycle}  ${checkpoint.createdAt}`);
+      }
+      return;
+    }
+
+    case "diff": {
+      printChanges(await repositoryDiff(root));
+      return;
+    }
+
+    case "restore": {
+      const reference = args.find((value) => value !== "--apply");
+      if (!reference) throw new Error("Usage: sessions restore <checkpoint-name-or-id> [--apply]");
+      const preview = await previewRestore(root, reference);
+      console.log(`Restore Preview\n\nCurrent workstream: ${(await getActiveWorkstream(root)).name}\nTarget: ◆ ${preview.checkpoint.friendlyName}\nAdd: ${preview.willAdd}\nModify: ${preview.willModify}\nRemove: ${preview.willRemove}\nUncheckpointed work: ${preview.dirty ? "Detected — protection checkpoint will be created" : "None"}\nTarget integrity: ${preview.checkpoint.recovery.verified ? "Verified" : "Unverified"}`);
+      if (!args.includes("--apply")) {
+        console.log("\nPreview only. Re-run with --apply to restore.");
+        return;
+      }
+      const result = await restoreCheckpoint(root, reference);
+      console.log(`\nRestored ◆ ${result.restored.friendlyName}${result.protectionCheckpoint ? `\nProtected previous work as ◆ ${result.protectionCheckpoint.friendlyName}` : ""}`);
       return;
     }
 
@@ -138,10 +202,7 @@ async function main() {
       if (!objective) throw new Error("Usage: sessions start <objective>");
       const repository = await openRepository(root);
       const workstream = await getActiveWorkstream(root);
-      const created = await request("/api/sessions", {
-        method: "POST",
-        body: JSON.stringify({ objective, repositoryId: repository.id, projectId: workstream.id }),
-      });
+      const created = await request("/api/sessions", { method: "POST", body: JSON.stringify({ objective, repositoryId: repository.id, projectId: workstream.id }) });
       await saveRuntime({ ...runtime, sessionId: created.session.id });
       console.log(`${created.session.id}\n${objective}`);
       return;
@@ -182,10 +243,10 @@ async function main() {
       return;
     }
 
-    case "rollback": {
+    case "recovery": {
       const sessionId = requireSession(runtime);
       const checkpointId = args[0];
-      if (!checkpointId) throw new Error("Usage: sessions rollback <checkpoint-id>");
+      if (!checkpointId) throw new Error("Usage: sessions recovery <checkpoint-id>");
       const hostedSnapshotId = runtime.checkpointSnapshots?.[checkpointId];
       if (!hostedSnapshotId) throw new Error(`Checkpoint ${checkpointId} has no hosted recovery snapshot in the active Session`);
       console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/rollback`, { method: "POST", body: JSON.stringify({ snapshotId: hostedSnapshotId }) }), null, 2));
