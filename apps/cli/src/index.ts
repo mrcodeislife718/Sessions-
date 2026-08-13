@@ -20,7 +20,7 @@ const root = process.cwd();
 const stateDir = join(root, ".sessions");
 const runtimeFile = join(stateDir, "runtime.json");
 
-type RuntimeState = { sessionId?: string };
+type RuntimeState = { sessionId?: string; checkpointSnapshots?: Record<string, string> };
 
 async function loadRuntime(): Promise<RuntimeState> {
   try { return JSON.parse(await readFile(runtimeFile, "utf8")); } catch { return {}; }
@@ -110,15 +110,21 @@ async function main() {
       const friendlyName = args.join(" ").trim();
       if (!friendlyName) throw new Error("Usage: sessions checkpoint <name>");
       const checkpoint = await createCheckpoint(root, { friendlyName });
+      let hostedSnapshotId: string | undefined;
       if (runtime.sessionId) {
-        await request(`/api/sessions/${runtime.sessionId}/snapshots`, {
+        const hosted = await request(`/api/sessions/${runtime.sessionId}/snapshots`, {
           method: "POST",
           body: JSON.stringify({
             entries: checkpoint.entries.map((entry) => ({ path: entry.path, contentHash: entry.digest, size: entry.size })),
           }),
         });
+        hostedSnapshotId = hosted.id;
+        await saveRuntime({
+          ...runtime,
+          checkpointSnapshots: { ...(runtime.checkpointSnapshots ?? {}), [checkpoint.id]: hosted.id },
+        });
       }
-      console.log(JSON.stringify(checkpoint, null, 2));
+      console.log(JSON.stringify({ ...checkpoint, hostedSnapshotId }, null, 2));
       return;
     }
 
@@ -136,7 +142,7 @@ async function main() {
         method: "POST",
         body: JSON.stringify({ objective, repositoryId: repository.id, projectId: workstream.id }),
       });
-      await saveRuntime({ sessionId: created.session.id });
+      await saveRuntime({ ...runtime, sessionId: created.session.id });
       console.log(`${created.session.id}\n${objective}`);
       return;
     }
@@ -154,11 +160,12 @@ async function main() {
       const [kind = "custom", status = "requires_review", ...summaryParts] = args;
       const history = await listHistory(root);
       const head = history[0];
+      const hostedSnapshotId = head ? runtime.checkpointSnapshots?.[head.id] : undefined;
       const result = await request(`/api/sessions/${sessionId}/verifications`, {
         method: "POST",
-        body: JSON.stringify({ kind, status, snapshotId: head?.id, summary: summaryParts.join(" ") || "CLI verification" }),
+        body: JSON.stringify({ kind, status, snapshotId: hostedSnapshotId, summary: summaryParts.join(" ") || "CLI verification" }),
       });
-      console.log(JSON.stringify(result, null, 2));
+      console.log(JSON.stringify({ checkpointId: head?.id, hostedSnapshotId, ...result }, null, 2));
       return;
     }
 
@@ -179,7 +186,9 @@ async function main() {
       const sessionId = requireSession(runtime);
       const checkpointId = args[0];
       if (!checkpointId) throw new Error("Usage: sessions rollback <checkpoint-id>");
-      console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/rollback`, { method: "POST", body: JSON.stringify({ snapshotId: checkpointId }) }), null, 2));
+      const hostedSnapshotId = runtime.checkpointSnapshots?.[checkpointId];
+      if (!hostedSnapshotId) throw new Error(`Checkpoint ${checkpointId} has no hosted recovery snapshot in the active Session`);
+      console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/rollback`, { method: "POST", body: JSON.stringify({ snapshotId: hostedSnapshotId }) }), null, 2));
       return;
     }
 
