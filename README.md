@@ -1,148 +1,264 @@
 # Sessions
 
-**AI-native source control and execution infrastructure for AI systems, AI agents, and humans.**
+**Native software development infrastructure for AI systems, AI agents, and humans.**
 
-Sessions is the operating environment for software systems built, modified, verified, deployed, and evolved collaboratively by humans and AI.
+Sessions is an independent source-control, collaboration, execution, verification, recovery, and deployment platform designed for modern software development.
 
-Traditional version control preserves file history. Sessions preserves the execution context around software change: who or what acted, what objective was being pursued, which repository state was received, which tools and commands were used, what changed, which verification evidence passed or failed, what was deployed, and how the resulting system can be replayed, reconstructed, recovered, or rolled back.
+Sessions is not a wrapper around another source-control or collaboration system. It owns its own development model, repository state, workstreams, checkpoints, reviews, verification, activity history, releases, deployments, permissions, execution lineage, memory, replay, recovery, and rollback.
 
-> Git and GitHub were created for a software-development world centered primarily around human developers and file-based version history. Sessions is designed for the emerging world where AI systems, AI agents, and humans build, modify, operate, verify, and evolve software together.
+## Product mission
+
+Make software development simpler, more understandable, more verifiable, more recoverable, and more collaborative for humans and AI.
 
 ## The developer promise
 
 Sessions should make a developer's life easier before it asks them to learn a new infrastructure model.
 
-The product is designed to reduce four expensive kinds of engineering work:
+It is designed to reduce:
 
-- **reconstruction:** stop piecing together what happened from chat history, terminal scrollback, commits, CI logs, and memory;
-- **review overhead:** focus attention on consequential, risky, or unverified changes instead of treating every generated line equally;
-- **verification uncertainty:** keep test, build, security, policy, and approval evidence attached to the exact state that produced it;
-- **recovery time:** move from a failure to a known-good checkpoint with replay and rollback context already available.
+- reconstruction work;
+- source-control bookkeeping;
+- review overhead;
+- verification uncertainty;
+- context switching;
+- recovery time;
+- fragmented development history.
 
 The first product experience should answer, in seconds:
 
-1. What changed?
-2. Who or what changed it?
-3. Why did it change?
-4. What was actually verified?
-5. What failed?
-6. Can I replay how we got here?
-7. Can I roll back safely?
+1. What is being worked on?
+2. Who or what is working on it?
+3. What changed?
+4. Why did it change?
+5. What progress has been made?
+6. What was verified?
+7. What failed?
+8. What state is safe?
+9. Can I replay how we got here?
+10. Can I restore safely?
 
-Sessions is not intended to create another dashboard developers must babysit. It should remove debugging archaeology, reduce context switching, and make human/AI software work easier to trust and recover.
+## Three platform layers
 
-## Product category
+```text
+SESSIONS
+│
+├── Source Control
+│   ├── Repositories
+│   ├── Workstreams
+│   ├── Checkpoints
+│   ├── History
+│   ├── Diffs
+│   ├── Integrate
+│   ├── Restore
+│   ├── Publish
+│   ├── Local/offline operation
+│   ├── Content integrity
+│   └── Distributed synchronization
+│
+├── Collaboration
+│   ├── Organizations
+│   ├── Teams
+│   ├── Permissions
+│   ├── Work Items
+│   ├── Change Reviews
+│   ├── Approvals
+│   ├── Activity
+│   ├── Search
+│   ├── Notifications
+│   ├── Verification
+│   ├── Runners
+│   ├── Releases
+│   ├── Deployments
+│   ├── APIs
+│   ├── Webhooks
+│   ├── Packages / Artifacts
+│   ├── Dashboards
+│   ├── Audit
+│   └── Developer identity
+│
+└── Intelligence
+    ├── Human execution lineage
+    ├── AI-system execution lineage
+    ├── AI-agent execution lineage
+    ├── Objectives and intent
+    ├── Tool and command history
+    ├── Semantic state
+    ├── Verification lineage
+    ├── Engineering memory
+    ├── Causal timeline
+    ├── Replay
+    ├── Recovery
+    ├── Trust evidence
+    └── Semantic rollback
+```
 
-Sessions combines AI-native source control, execution lineage, software verification, engineering memory, deployment history, and operational observability in one platform.
+## Sessions-native development model
 
-Sessions is not infrastructure only for autonomous agents. A human engineer can create and operate a Session. An AI coding agent can create and operate within a Session. A larger AI system coordinating models, agents, tools, and humans can operate through Sessions. Mixed human/AI workflows are first-class.
+The core workflow is intentionally simpler than traditional source-control mechanics:
 
-## Core workflow
+```text
+Goal
+  ↓
+Workstream
+  ↓
+Session
+  ↓
+Checkpoint
+  ↓
+Verify
+  ↓
+Review
+  ↓
+Integrate
+  ↓
+Publish
+  ↓
+Release
+  ↓
+Deploy
+```
+
+### Repository
+
+A Sessions repository is the native container for source, history, workstreams, checkpoints, reviews, verification, releases, deployment state, and execution lineage.
+
+### Workstream
+
+A Workstream represents an active line of development tied to a meaningful objective. Developers work with purpose-oriented Workstreams rather than managing source-control mechanics as the primary mental model.
+
+### Session
+
+A Session records the attributable execution story of work performed by humans, AI systems, AI agents, and services.
+
+### Checkpoint
+
+A Checkpoint is a first-class immutable state of the software. It captures source state, semantic change, objective, actors, execution lineage, verification evidence, integrity, parent state, and recovery metadata.
+
+Checkpoint lifecycle:
+
+```text
+Draft → Verified → Reviewed → Approved → Published
+```
+
+### Change Review
+
+A Change Review is the native review object for a Workstream or Checkpoint. It combines semantic change, raw source differences, objective, actors, verification evidence, risk, approvals, and recovery information.
+
+### Integrate
+
+Integrate combines approved work into the target Workstream while checking source differences, semantic conflicts, verification evidence, overlapping work, policy requirements, and rollback readiness.
+
+### Publish
+
+Publish makes a qualified state available to the shared Sessions repository and collaboration platform.
+
+### Restore
+
+Restore returns software to a known Checkpoint through preview, integrity verification, reconstruction, post-restore verification, and auditable recovery.
+
+## Core execution loop
 
 ```text
 Human / AI System / AI Agent Goal
               ↓
 Collaborative Execution
               ↓
-Sessions captures execution
+Sessions records progress
               ↓
-CodeVault preserves semantic state
+CodeVault preserves source state
               ↓
-Verification validates the result
+Checkpoint captures meaningful state
+              ↓
+Verification validates evidence
               ↓
 Timeline records lineage
               ↓
 Memory preserves engineering knowledge
               ↓
+Review / Integrate / Publish
+              ↓
 Deployment proceeds or is blocked
               ↓
-Replay / Recovery / Rollback
+Replay / Recovery / Restore
 ```
 
-## What Sessions adds beyond Git
+## Progress is first-class
 
-Git primarily tracks files, commits, branches, merges, and authorship.
+Sessions continuously exposes proof that engineering work is moving forward through:
 
-Sessions additionally tracks:
+- Session activity;
+- actor contribution history;
+- Workstream progress;
+- Checkpoints;
+- semantic change summaries;
+- verification progress;
+- milestones;
+- review status;
+- release status;
+- deployment and recovery history.
 
-- human execution history;
-- AI-agent execution history;
-- AI-system execution history;
-- human/AI collaboration;
-- objectives and intent;
-- semantic state;
-- tool and command execution;
-- verification lineage;
-- engineering memory;
-- execution provenance;
-- deployment evolution;
-- replay;
-- recovery;
-- rollback.
+Full execution truth is preserved internally while useful product history remains easy to understand.
 
-## Core platform primitives
+## Core engines
 
-`Organization → Workspace → Project → Repository → Branch → Session → Snapshot → Timeline → Verification → Memory → Actor → Deployment → Rollback`
+### Native Repository Engine
 
-Actors are explicitly typed as `human`, `ai_agent`, `ai_system`, or `service` so provenance never collapses different kinds of execution into one generic identity.
-
-## Core platform
+Owns repository identity, source objects, Workstreams, Checkpoint graph, change detection, state reconstruction, integration, publication, local operation, and synchronization.
 
 ### CodeVault
 
-CodeVault is the immutable state, snapshot, reconstruction, and recovery engine inside Sessions. It preserves content-addressed software state, execution lineage, semantic checkpoints, integrity records, and rollback targets.
+Owns immutable content-addressed state, integrity hashes, Checkpoint material, reconstruction inputs, and recovery targets.
 
 ### Semantic Engine
 
-Understands changes at the system level: affected components, dependency relationships, architectural intent, behavioral impact, introduced risk, and the meaning of a change beyond its textual diff.
+Understands affected components, dependencies, architectural intent, behavioral impact, introduced risk, semantic relationships, and meaningful change beyond line differences.
 
 ### Verification Engine
 
-Coordinates linting, type checks, tests, security checks, policy checks, build validation, trust evidence, rollback analysis, and release evidence.
+Coordinates linting, type checks, tests, builds, security checks, policy checks, approvals, trust evidence, release gates, and recovery confidence.
 
 ### Timeline Engine
 
-Builds a chronological execution graph across human actions, AI-system activity, agent activity, prompts, tool calls, commands, file changes, validation events, deployments, failures, approvals, and recovery actions.
+Builds chronological attributable history across humans, AI systems, AI agents, services, tools, commands, changes, Checkpoints, verification, reviews, deployments, failures, and recovery.
 
 ### Memory Graph
 
-Preserves engineering knowledge across sessions, including architectural decisions, repository conventions, failure history, successful repairs, semantic relationships, and system evolution.
+Preserves durable engineering knowledge, architecture decisions, repository conventions, failure history, successful repairs, and semantic relationships.
 
 ### Execution Runtime
 
-Tracks and governs execution by AI systems, AI agents, humans, and supporting services, including model use, tool access, generated changes, task boundaries, approvals, and operational outcomes.
+Tracks and governs humans, AI systems, AI agents, services, model use, tool access, generated changes, task boundaries, approvals, authority, and operational outcomes.
+
+### Collaboration Platform
+
+Owns organizations, teams, permissions, Work Items, Change Reviews, activity, search, notifications, packages, releases, dashboards, audit, hosted repositories, and developer identity.
 
 ### Deployment Runtime
 
-Connects verified repository state to preview environments, releases, deployment records, health checks, rollback operations, and post-deployment evidence.
+Connects verified Checkpoints to environments, releases, deployments, health checks, recovery targets, and post-deployment evidence.
 
-### Observability Layer
+## Product surfaces
 
-Provides logs, metrics, traces, health information, token and model usage, cost records, execution status, and operational diagnostics.
+Sessions is one platform with many surfaces sharing one identity model, event model, repository model, authorization model, and execution graph:
 
-## Mixed workflow example
+- Web application
+- VS Code extension
+- Desktop application
+- Mobile application
+- CLI
+- API
+- SDK
+- MCP server
 
-```text
-Human starts Session
-    ↓
-AI system plans work
-    ↓
-Agent A investigates
-    ↓
-Human changes architecture
-    ↓
-Agent B implements
-    ↓
-Verification runs
-    ↓
-Human approves
-    ↓
-AI system deploys
-    ↓
-Sessions preserves the entire lineage
-```
+See [docs/SURFACES.md](./docs/SURFACES.md).
 
-Every consequential action emits a durable event. Critical history is append-only, integrity-protected, attributable to an actor, and reconstructable.
+## Developer-experience doctrine
+
+Sessions should never make developers perform bookkeeping that Sessions can reliably infer itself.
+
+The platform should automatically capture known context such as repository, Workstream, actors, changed files, execution events, verification evidence, Checkpoint relationships, and deployment state.
+
+The default experience is simple. Deep implementation detail remains available through progressive disclosure.
 
 ## Reliability doctrine
 
@@ -150,107 +266,83 @@ Every critical subsystem is designed around:
 
 - idempotency;
 - retryability;
-- rollback;
+- rollback and restore;
 - replayability;
 - auditability;
 - observability;
 - failure isolation;
-- immutable critical history.
+- immutable critical history;
+- integrity verification.
 
-Sessions never treats generated output as trusted merely because an AI produced it. Consequential output must be observable and capable of producing verification evidence.
+Sessions never treats generated output as trusted merely because an AI produced it.
 
 See [RELIABILITY.md](./RELIABILITY.md).
 
 ## Repository implementation
 
-The `launch/sessions-production` branch contains the open implementation foundation for the Sessions execution model and its developer-facing product surface, including typed actors, event contracts, CodeVault snapshot primitives, timeline recording, verification result contracts, a responsive Next.js application, and CI validation.
+The `launch/sessions-production` branch contains the active implementation foundation including:
 
-The current web surface includes:
+- human, AI-system, AI-agent, and service identities;
+- attributable event contracts;
+- CodeVault snapshots;
+- Timeline recording and replay;
+- verification evidence;
+- web UI;
+- CLI;
+- API;
+- runner;
+- SDK;
+- MCP server;
+- VS Code extension;
+- desktop application;
+- mobile application;
+- Docker production stack;
+- PostgreSQL persistence.
 
-- a developer-first product page;
-- a workspace dashboard focused on active Sessions, verification, rollback readiness, and recovery;
-- a Session detail surface combining participant provenance, execution timeline, semantic change summary, verification evidence, replay entry points, and rollback context.
-
-The initial implementation is intentionally modular and TypeScript-first so the core execution model can be validated before heavier hosted infrastructure is added.
+The next major implementation layer is the Sessions-native repository engine: source-object storage, Workstreams, Checkpoint graph, change detection, native integration, publication, local repository format, synchronization, and hosted collaboration.
 
 ## Engineering stack
 
-Target production stack:
+Current/target platform stack includes:
 
-- Next.js + TypeScript for product surfaces;
-- Node.js/NestJS for hosted APIs;
-- PostgreSQL + Prisma;
-- Redis + BullMQ;
+- TypeScript and Node.js;
+- Next.js for web surfaces;
+- PostgreSQL;
+- Redis;
 - S3-compatible object storage;
 - Docker-isolated runners;
 - OpenTelemetry-compatible telemetry;
-- provider abstraction for OpenAI, Anthropic, local models, and future systems;
-- pnpm + Turborepo-style workspace organization.
+- provider abstraction for AI systems;
+- pnpm workspace organization.
 
 ## Security and governance
 
 - Workspace-scoped permissions
 - Human, AI-system, AI-agent, and service identity
-- Tool and capability authorization
-- Approval gates for consequential actions
-- Sandboxed command execution
-- Secret and environment protection
-- Immutable evidence and integrity hashing
-- Tenant and project boundaries
+- Capability-scoped authority
+- Tool authorization
+- Approval gates
+- Sandboxed execution
+- Secret protection
+- Immutable evidence
+- Integrity hashing
+- Tenant boundaries
 - Idempotent consequential operations
-- Deployment and rollback controls
-- Complete execution and access auditability
+- Deployment and restore controls
+- Complete execution auditability
 
-## Adoption strategy
+## Product rule
 
-Sessions does not require teams to abandon Git. The initial wedge is to make AI-generated and human/AI collaborative software dramatically safer, easier to understand, and easier to recover while integrating with existing Git/GitHub workflows.
+**Preserve the capabilities developers need. Redesign unnecessary friction.**
 
-The north-star demonstration is simple:
-
-```text
-AI or human/AI workflow changes code
-    → Sessions captures the execution
-    → verification catches a regression
-    → timeline identifies how it happened
-    → replay reconstructs the path
-    → rollback restores a stable state
-```
-
-The packaging rule is equally simple: lead with the developer outcome, then reveal the infrastructure beneath it.
-
-**Stop guessing what changed. Know. Verify. Recover.**
-
-## Open-core direction
-
-Open-source surface:
-
-- CLI;
-- local execution capture;
-- event model;
-- snapshot fundamentals;
-- basic verification adapters;
-- SDK and integration contracts.
-
-Commercial surface:
-
-- hosted collaboration;
-- organizational memory;
-- enterprise governance and RBAC;
-- advanced semantic intelligence;
-- hosted runners;
-- deployment infrastructure;
-- large-scale orchestration;
-- advanced verification and compliance tooling.
+Sessions is intended to stand on its own as a complete development platform.
 
 ## Documentation
 
 - [ROADMAP.md](./ROADMAP.md) — implementation and launch sequence
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — system boundaries and execution model
-- [RELIABILITY.md](./RELIABILITY.md) — reliability doctrine and operational requirements
-
-## GitHub integration
-
-Sessions is intended to integrate with GitHub through a dedicated GitHub App for repository authorization, webhook ingestion, commit/PR association, validation evidence, and release visibility. Git integration is an adoption bridge and interoperability layer, not the limit of the Sessions execution model.
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — platform architecture
+- [RELIABILITY.md](./RELIABILITY.md) — reliability doctrine
+- [docs/SURFACES.md](./docs/SURFACES.md) — product surfaces
 
 ## Ownership
 
