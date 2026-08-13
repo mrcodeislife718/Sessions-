@@ -37,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (!sessionId) return vscode.window.showWarningMessage("Start a Session first.");
         const root = vscode.workspace.workspaceFolders?.[0];
         if (!root) return vscode.window.showWarningMessage("Open a repository folder first.");
-        const files = await vscode.workspace.findFiles("**/*", "{**/.git/**,**/.sessions/**,**/node_modules/**,**/.next/**,**/dist/**,**/coverage/**}");
+        const files = await vscode.workspace.findFiles("**/*", "{**/.*/**,**/node_modules/**,**/.next/**,**/dist/**,**/coverage/**}");
         const entries = [];
         for (const uri of files) {
           const bytes = await vscode.workspace.fs.readFile(uri);
