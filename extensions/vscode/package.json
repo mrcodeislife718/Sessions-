@@ -1,7 +1,7 @@
 {
   "name": "sessions-vscode",
   "displayName": "Sessions",
-  "description": "AI-native source control and execution visibility for AI systems, AI agents, and humans.",
+  "description": "Native development workflow, source control, verification, execution visibility, and recovery for humans and AI.",
   "version": "0.1.0",
   "private": true,
   "engines": { "vscode": "^1.95.0" },
@@ -19,22 +19,30 @@
       }
     },
     "commands": [
+      { "command": "sessions.refresh", "title": "Sessions: Refresh" },
       { "command": "sessions.start", "title": "Sessions: Start Session" },
+      { "command": "sessions.stageAll", "title": "Sessions: Stage All Changes" },
+      { "command": "sessions.unstageAll", "title": "Sessions: Unstage All Changes" },
       { "command": "sessions.checkpoint", "title": "Sessions: Create Checkpoint" },
+      { "command": "sessions.switchWorkstream", "title": "Sessions: Switch Workstream" },
       { "command": "sessions.verify", "title": "Sessions: Verify Current State" },
+      { "command": "sessions.integrity", "title": "Sessions: Verify Repository Integrity" },
       { "command": "sessions.timeline", "title": "Sessions: Open Timeline" },
-      { "command": "sessions.rollback", "title": "Sessions: Roll Back" }
+      { "command": "sessions.rollback", "title": "Sessions: Prepare Recovery" }
     ],
     "viewsContainers": {
       "activitybar": [{ "id": "sessions", "title": "Sessions", "icon": "resources/icon.svg" }]
     },
     "views": {
-      "sessions": [{ "id": "sessions.overview", "name": "Current Session" }]
+      "sessions": [{ "id": "sessions.overview", "name": "Source Control & Session" }]
     }
   },
   "scripts": {
     "build": "tsc -p .",
     "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "@sessions/native-repository": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
