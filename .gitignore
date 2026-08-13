@@ -3,6 +3,7 @@ dist/
 .turbo/
 .next/
 coverage/
+.sessions/
 .env
 .env.*
 !.env.example
