@@ -128,8 +128,10 @@ export async function handleNativeCommand(command: string | undefined, args: str
       console.log(`Restore Preview\n\nCurrent workstream: ${(await getActiveWorkstream(root)).name}\nTarget: ◆ ${preview.checkpoint.friendlyName}\nAdd: ${preview.willAdd}\nModify: ${preview.willModify}\nRemove: ${preview.willRemove}\nUncheckpointed work: ${preview.dirty ? "Detected — protection Checkpoint will be created" : "None"}\nTarget integrity: ${preview.checkpoint.recovery.verified ? "Verified" : "Unverified"}`);
       if (!args.includes("--apply")) console.log("\nPreview only. Re-run with --apply to restore.");
       else {
+        const stagedBeforeRestore = await listStaged(root);
+        if (stagedBeforeRestore.length) await unstagePaths(root, ["."]);
         const result = await restoreCheckpoint(root, reference);
-        console.log(`\nRestored ◆ ${result.restored.friendlyName}${result.protectionCheckpoint ? `\nProtected previous work as ◆ ${result.protectionCheckpoint.friendlyName}` : ""}`);
+        console.log(`\nRestored ◆ ${result.restored.friendlyName}${result.protectionCheckpoint ? `\nProtected the complete pre-restore working tree as ◆ ${result.protectionCheckpoint.friendlyName}` : ""}`);
       }
       return true;
     }
