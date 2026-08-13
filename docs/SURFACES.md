@@ -1,104 +1,160 @@
 # Sessions Product Surfaces
 
-Sessions is one platform with many interfaces into the same execution graph, identity model, event model, and authorization system.
+Sessions is one native development platform with many interfaces into the same repository model, execution graph, identity model, event model, authorization model, collaboration state, and recovery system.
 
 ## Product rule
 
-**One backend. One event model. One identity model. Many surfaces.**
+**One platform. One repository model. One event model. One identity model. Many surfaces.**
 
-A Session may begin in VS Code, continue through an AI system using the API, be reviewed in the web app, require approval from mobile, and be recovered from the desktop app. It remains one Session with one lineage.
+A Workstream can begin on desktop, continue in VS Code, be advanced by an AI system through the API, reviewed in the web app, approved from mobile, and restored through the runner. It remains one Sessions-native development history.
 
-## Surface responsibilities
+## Web app
 
-### VS Code extension
-Primary in-workflow developer surface.
+The full collaboration and development control center.
 
-- detect Sessions-enabled repositories
-- start and stop Sessions
-- show human, AI-system, and AI-agent participants
+- repositories
+- Workstreams
+- Sessions
+- Checkpoints
+- history
+- source differences
+- Change Reviews
+- Work Items
+- verification
+- activity and progress
+- releases
+- deployments
+- recovery
+- teams
+- permissions
+- identity
+- search
+- notifications
+- audit
+- billing and administration
+
+## VS Code extension
+
+Primary in-editor developer surface.
+
+- detect Sessions repositories
+- initialize repositories
+- create and switch Workstreams
+- start Sessions
+- show human, AI-system, and AI-agent activity
 - surface changed systems and files
-- display verification status and failures
-- create checkpoints
+- display progress and verification
+- create Checkpoints
+- inspect history
+- review source and semantic changes
 - replay execution history
 - show risk and approval requirements
-- initiate safe rollback flows
-- avoid forcing developers to leave the editor for routine operations
+- initiate safe restore flows
 
-### Web app
-Full workspace and organizational control plane.
+Routine operations should not require leaving the editor.
 
-- repositories and projects
-- Session timelines
-- verification evidence
-- engineering memory
-- teams and RBAC
-- deployments
-- governance and approvals
-- analytics and observability
-- account and billing administration
+## Desktop app
 
-### CLI
+High-bandwidth local development workstation.
+
+- repository management
+- Workstream management
+- source history
+- local/offline operation
+- local runners
+- execution history
+- multi-repository workflows
+- filesystem and OS integration
+- verification
+- review
+- synchronization
+- releases
+- recovery and restore
+
+## Mobile app
+
+Operational awareness, review, and approval surface.
+
+- Workstream and Session status
+- progress
+- review requests
+- approval requests
+- verification failures
+- release and deployment health
+- recovery readiness
+- restore authorization
+- concise engineering summaries
+
+Mobile is not intended to be a miniature IDE.
+
+## CLI
+
 Fast local and automation interface.
 
-Canonical commands include:
+Canonical native command direction:
 
 ```text
 sessions init
-sessions import
-sessions start
+sessions status
+sessions workstream create
+sessions workstream switch
 sessions checkpoint
+sessions history
+sessions diff
 sessions verify
+sessions review
+sessions integrate
+sessions publish
+sessions sync
 sessions timeline
 sessions replay
-sessions rollback
+sessions restore
+sessions release
 sessions deploy
-sessions memory
-sessions agents
 ```
 
-### Desktop app
-Local-first power-user surface.
+## API / SDK / MCP
 
-- repository management
-- local runners
-- local and offline execution history
-- filesystem and OS integration
-- multi-repository workflows
-- desktop notifications
-- recovery and rollback tooling
+Machine-facing surface for AI systems, AI agents, developer tools, automation, and first-party Sessions clients.
 
-### Mobile app
-Operational awareness and approval surface, not a mobile IDE.
+- repositories
+- Workstreams
+- Sessions
+- actors
+- events
+- Checkpoints
+- diffs
+- verification evidence
+- reviews
+- integration
+- publication
+- synchronization
+- timelines
+- replay
+- recovery
+- releases
+- deployments
+- permissions and governed execution
 
-- Session status
-- approval requests
-- failed verification alerts
-- deployment health
-- rollback authorization
-- concise "what happened?" summaries
-- incident and escalation notifications
+## Shared interaction language
 
-### API / SDK / MCP
-Machine-facing integration surface for AI systems, AI agents, developer tools, and automation.
+Every product surface uses the same concepts:
 
-- create and operate Sessions
-- emit execution events
-- register actors
-- create checkpoints
-- submit verification evidence
-- query timelines
-- inspect state
-- request replay plans
-- participate in governed execution workflows
+- Repository
+- Workstream
+- Session
+- Checkpoint
+- Change Review
+- Verify
+- Integrate
+- Publish
+- Release
+- Deploy
+- Replay
+- Restore
 
-## Priority
-
-1. VS Code + CLI + Web
-2. Desktop
-3. Mobile
-
-Desktop and mobile must share the same platform contracts instead of implementing independent business logic.
+The interfaces may adapt to their environment, but the mental model must not change from surface to surface.
 
 ## Developer-experience requirement
 
-Every surface must reduce friction. Sessions should follow the developer into the tools they already use rather than demanding that they constantly switch context to a separate dashboard.
+Every surface must reduce friction and expose visible proof of progress. Sessions should automatically capture context it already knows and avoid asking developers to perform redundant bookkeeping.
