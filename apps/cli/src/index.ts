@@ -8,7 +8,7 @@ const [, , command, ...args] = process.argv;
 const api = process.env.SESSIONS_API_URL ?? "http://localhost:4000";
 const stateDir = join(process.cwd(), ".sessions");
 const stateFile = join(stateDir, "state.json");
-const ignored = new Set([".git", ".sessions", "node_modules", ".next", "dist", "coverage"]);
+const ignored = new Set([".sessions", "node_modules", ".next", "dist", "coverage"]);
 
 type LocalState = { sessionId?: string; repositoryId?: string };
 type SnapshotEntry = { path: string; contentHash: string; size: number };
@@ -33,7 +33,7 @@ function requireSession(state: LocalState): string {
 async function captureTree(root: string, dir = root): Promise<SnapshotEntry[]> {
   const entries: SnapshotEntry[] = [];
   for (const name of await readdir(dir)) {
-    if (ignored.has(name)) continue;
+    if (ignored.has(name) || (name.startsWith(".") && name !== ".env.example")) continue;
     const absolute = join(dir, name);
     const info = await stat(absolute);
     if (info.isDirectory()) entries.push(...await captureTree(root, absolute));
