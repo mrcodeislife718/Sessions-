@@ -8,6 +8,29 @@ Traditional version control preserves file history. Sessions preserves the execu
 
 > Git and GitHub were created for a software-development world centered primarily around human developers and file-based version history. Sessions is designed for the emerging world where AI systems, AI agents, and humans build, modify, operate, verify, and evolve software together.
 
+## The developer promise
+
+Sessions should make a developer's life easier before it asks them to learn a new infrastructure model.
+
+The product is designed to reduce four expensive kinds of engineering work:
+
+- **reconstruction:** stop piecing together what happened from chat history, terminal scrollback, commits, CI logs, and memory;
+- **review overhead:** focus attention on consequential, risky, or unverified changes instead of treating every generated line equally;
+- **verification uncertainty:** keep test, build, security, policy, and approval evidence attached to the exact state that produced it;
+- **recovery time:** move from a failure to a known-good checkpoint with replay and rollback context already available.
+
+The first product experience should answer, in seconds:
+
+1. What changed?
+2. Who or what changed it?
+3. Why did it change?
+4. What was actually verified?
+5. What failed?
+6. Can I replay how we got here?
+7. Can I roll back safely?
+
+Sessions is not intended to create another dashboard developers must babysit. It should remove debugging archaeology, reduce context switching, and make human/AI software work easier to trust and recover.
+
 ## Product category
 
 Sessions combines AI-native source control, execution lineage, software verification, engineering memory, deployment history, and operational observability in one platform.
@@ -140,7 +163,13 @@ See [RELIABILITY.md](./RELIABILITY.md).
 
 ## Repository implementation
 
-The `launch/sessions-production` branch contains the open implementation foundation for the Sessions execution model, including typed actors, event contracts, CodeVault snapshot primitives, timeline recording, and verification result contracts.
+The `launch/sessions-production` branch contains the open implementation foundation for the Sessions execution model and its developer-facing product surface, including typed actors, event contracts, CodeVault snapshot primitives, timeline recording, verification result contracts, a responsive Next.js application, and CI validation.
+
+The current web surface includes:
+
+- a developer-first product page;
+- a workspace dashboard focused on active Sessions, verification, rollback readiness, and recovery;
+- a Session detail surface combining participant provenance, execution timeline, semantic change summary, verification evidence, replay entry points, and rollback context.
 
 The initial implementation is intentionally modular and TypeScript-first so the core execution model can be validated before heavier hosted infrastructure is added.
 
@@ -174,7 +203,7 @@ Target production stack:
 
 ## Adoption strategy
 
-Sessions does not require teams to abandon Git. The initial wedge is to make AI-generated and human/AI collaborative software dramatically safer and more understandable while integrating with existing Git/GitHub workflows.
+Sessions does not require teams to abandon Git. The initial wedge is to make AI-generated and human/AI collaborative software dramatically safer, easier to understand, and easier to recover while integrating with existing Git/GitHub workflows.
 
 The north-star demonstration is simple:
 
@@ -186,6 +215,10 @@ AI or human/AI workflow changes code
     → replay reconstructs the path
     → rollback restores a stable state
 ```
+
+The packaging rule is equally simple: lead with the developer outcome, then reveal the infrastructure beneath it.
+
+**Stop guessing what changed. Know. Verify. Recover.**
 
 ## Open-core direction
 
