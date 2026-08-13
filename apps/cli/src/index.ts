@@ -1,111 +1,190 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  createCheckpoint,
+  createWorkstream,
+  getActiveWorkstream,
+  initializeRepository,
+  listHistory,
+  listWorkstreams,
+  openRepository,
+  repositoryStatus,
+  switchWorkstream,
+} from "@sessions/native-repository";
 
 const [, , command, ...args] = process.argv;
 const api = process.env.SESSIONS_API_URL ?? "http://localhost:4000";
-const stateDir = join(process.cwd(), ".sessions");
-const stateFile = join(stateDir, "state.json");
-const ignored = new Set([".sessions", "node_modules", ".next", "dist", "coverage"]);
+const root = process.cwd();
+const stateDir = join(root, ".sessions");
+const runtimeFile = join(stateDir, "runtime.json");
 
-type LocalState = { sessionId?: string; repositoryId?: string };
-type SnapshotEntry = { path: string; contentHash: string; size: number };
+type RuntimeState = { sessionId?: string };
 
-async function loadState(): Promise<LocalState> {
-  try { return JSON.parse(await readFile(stateFile, "utf8")); } catch { return {}; }
+async function loadRuntime(): Promise<RuntimeState> {
+  try { return JSON.parse(await readFile(runtimeFile, "utf8")); } catch { return {}; }
 }
-async function saveState(state: LocalState) {
+
+async function saveRuntime(state: RuntimeState) {
   await mkdir(stateDir, { recursive: true });
-  await writeFile(stateFile, JSON.stringify(state, null, 2));
+  await writeFile(runtimeFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
+
 async function request(path: string, init?: RequestInit) {
   const response = await fetch(`${api}${path}`, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
   return body;
 }
-function requireSession(state: LocalState): string {
+
+function requireSession(state: RuntimeState): string {
   if (!state.sessionId) throw new Error("No active Session. Run: sessions start <objective>");
   return state.sessionId;
 }
-async function captureTree(root: string, dir = root): Promise<SnapshotEntry[]> {
-  const entries: SnapshotEntry[] = [];
-  for (const name of await readdir(dir)) {
-    if (ignored.has(name) || (name.startsWith(".") && name !== ".env.example")) continue;
-    const absolute = join(dir, name);
-    const info = await stat(absolute);
-    if (info.isDirectory()) entries.push(...await captureTree(root, absolute));
-    else if (info.isFile()) {
-      const content = await readFile(absolute);
-      entries.push({ path: relative(root, absolute).replaceAll("\\", "/"), contentHash: createHash("sha256").update(content).digest("hex"), size: info.size });
-    }
-  }
-  return entries.sort((a, b) => a.path.localeCompare(b.path));
-}
 
-const help = `Sessions CLI\n\nCommands:\n  init [repository-id]\n  start <objective>\n  record <EventType> [message]\n  checkpoint\n  verify <kind> <passed|failed|requires_review> <summary>\n  timeline\n  replay\n  rollback <snapshot-id>\n  status\n`;
+const help = `Sessions CLI
+
+Native source control:
+  init [name]
+  status
+  workstream list
+  workstream create <name> [objective]
+  workstream switch <workstream-id>
+  checkpoint <name>
+  history
+
+Execution + intelligence:
+  start <objective>
+  record <EventType> [message]
+  verify <kind> <passed|failed|requires_review> <summary>
+  timeline
+  replay
+  rollback <checkpoint-id>
+`;
 
 async function main() {
-  const state = await loadState();
+  const runtime = await loadRuntime();
+
   switch (command) {
     case "init": {
-      const repositoryId = args[0] ?? process.cwd().split(/[\\/]/).pop() ?? "repository_local";
-      await saveState({ ...state, repositoryId });
-      console.log(`Sessions initialized for ${repositoryId}`);
+      const manifest = await initializeRepository(root, args.join(" ").trim() || undefined);
+      console.log(`Initialized Sessions repository ${manifest.name}\n${manifest.id}`);
       return;
     }
+
+    case "status": {
+      const status = await repositoryStatus(root);
+      const session = runtime.sessionId ? await request(`/api/sessions/${runtime.sessionId}`).catch(() => null) : null;
+      console.log(JSON.stringify({ repository: status, activeSession: session }, null, 2));
+      return;
+    }
+
+    case "workstream": {
+      const [action, value, ...objectiveParts] = args;
+      if (action === "list") {
+        const active = await getActiveWorkstream(root);
+        const workstreams = await listWorkstreams(root);
+        console.log(JSON.stringify(workstreams.map((item) => ({ ...item, active: item.id === active.id })), null, 2));
+        return;
+      }
+      if (action === "create") {
+        if (!value) throw new Error("Usage: sessions workstream create <name> [objective]");
+        const current = await getActiveWorkstream(root);
+        const created = await createWorkstream(root, { name: value, objective: objectiveParts.join(" ") || undefined, fromCheckpointId: current.headCheckpointId });
+        await switchWorkstream(root, created.id);
+        console.log(`Created and switched to ${created.name}\n${created.id}`);
+        return;
+      }
+      if (action === "switch") {
+        if (!value) throw new Error("Usage: sessions workstream switch <workstream-id>");
+        await switchWorkstream(root, value);
+        const active = await getActiveWorkstream(root);
+        console.log(`Active Workstream: ${active.name}\n${active.id}`);
+        return;
+      }
+      throw new Error("Usage: sessions workstream <list|create|switch>");
+    }
+
+    case "checkpoint": {
+      const friendlyName = args.join(" ").trim();
+      if (!friendlyName) throw new Error("Usage: sessions checkpoint <name>");
+      const checkpoint = await createCheckpoint(root, { friendlyName });
+      if (runtime.sessionId) {
+        await request(`/api/sessions/${runtime.sessionId}/snapshots`, {
+          method: "POST",
+          body: JSON.stringify({
+            entries: checkpoint.entries.map((entry) => ({ path: entry.path, contentHash: entry.digest, size: entry.size })),
+          }),
+        });
+      }
+      console.log(JSON.stringify(checkpoint, null, 2));
+      return;
+    }
+
+    case "history": {
+      console.log(JSON.stringify(await listHistory(root), null, 2));
+      return;
+    }
+
     case "start": {
       const objective = args.join(" ").trim();
       if (!objective) throw new Error("Usage: sessions start <objective>");
-      const repositoryId = state.repositoryId ?? process.cwd().split(/[\\/]/).pop() ?? "repository_local";
-      const created = await request("/api/sessions", { method: "POST", body: JSON.stringify({ objective, repositoryId }) });
-      await saveState({ repositoryId, sessionId: created.session.id });
+      const repository = await openRepository(root);
+      const workstream = await getActiveWorkstream(root);
+      const created = await request("/api/sessions", {
+        method: "POST",
+        body: JSON.stringify({ objective, repositoryId: repository.id, projectId: workstream.id }),
+      });
+      await saveRuntime({ sessionId: created.session.id });
       console.log(`${created.session.id}\n${objective}`);
       return;
     }
+
     case "record": {
-      const sessionId = requireSession(state);
+      const sessionId = requireSession(runtime);
       const [type, ...message] = args;
       if (!type) throw new Error("Usage: sessions record <EventType> [message]");
       console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/events`, { method: "POST", body: JSON.stringify({ type, payload: { message: message.join(" ") } }) }), null, 2));
       return;
     }
-    case "checkpoint": {
-      const sessionId = requireSession(state);
-      const entries = await captureTree(process.cwd());
-      const snapshot = await request(`/api/sessions/${sessionId}/snapshots`, { method: "POST", body: JSON.stringify({ entries }) });
-      console.log(`${snapshot.id}\n${entries.length} files captured\n${snapshot.digest}`);
-      return;
-    }
+
     case "verify": {
-      const sessionId = requireSession(state);
+      const sessionId = requireSession(runtime);
       const [kind = "custom", status = "requires_review", ...summaryParts] = args;
-      const result = await request(`/api/sessions/${sessionId}/verifications`, { method: "POST", body: JSON.stringify({ kind, status, summary: summaryParts.join(" ") || "CLI verification" }) });
+      const history = await listHistory(root);
+      const head = history[0];
+      const result = await request(`/api/sessions/${sessionId}/verifications`, {
+        method: "POST",
+        body: JSON.stringify({ kind, status, snapshotId: head?.id, summary: summaryParts.join(" ") || "CLI verification" }),
+      });
       console.log(JSON.stringify(result, null, 2));
       return;
     }
-    case "timeline":
-    case "status": {
-      const sessionId = requireSession(state);
+
+    case "timeline": {
+      const sessionId = requireSession(runtime);
       const aggregate = await request(`/api/sessions/${sessionId}`);
-      console.log(JSON.stringify(command === "timeline" ? aggregate.events : aggregate, null, 2));
+      console.log(JSON.stringify(aggregate.events, null, 2));
       return;
     }
+
     case "replay": {
-      const sessionId = requireSession(state);
+      const sessionId = requireSession(runtime);
       console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/replay`, { method: "POST", body: "{}" }), null, 2));
       return;
     }
+
     case "rollback": {
-      const sessionId = requireSession(state);
-      const snapshotId = args[0];
-      if (!snapshotId) throw new Error("Usage: sessions rollback <snapshot-id>");
-      console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/rollback`, { method: "POST", body: JSON.stringify({ snapshotId }) }), null, 2));
+      const sessionId = requireSession(runtime);
+      const checkpointId = args[0];
+      if (!checkpointId) throw new Error("Usage: sessions rollback <checkpoint-id>");
+      console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/rollback`, { method: "POST", body: JSON.stringify({ snapshotId: checkpointId }) }), null, 2));
       return;
     }
-    default: console.log(help);
+
+    default:
+      console.log(help);
   }
 }
 
