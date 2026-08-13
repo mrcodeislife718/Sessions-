@@ -2,22 +2,30 @@
 
 ## North Star
 
-Sessions is AI-native source control and execution infrastructure for **AI systems, AI agents, and humans**.
+Sessions is a native software development platform for **AI systems, AI agents, and humans**.
 
-Every milestone must improve at least one of: understanding, verification, reliability, recoverability, replayability, performance, or observability.
+It owns three first-class layers:
 
-## Canonical success loop
+1. **Source Control** — repositories, Workstreams, Checkpoints, history, diffs, integration, restore, publication, local/offline operation, content integrity, and synchronization.
+2. **Collaboration** — organizations, teams, permissions, Work Items, Change Reviews, approvals, activity, search, notifications, verification, runners, releases, deployments, APIs, webhooks, packages/artifacts, dashboards, audit, and developer identity.
+3. **Intelligence** — execution lineage, objectives, intent, semantic state, verification lineage, engineering memory, causal timeline, replay, recovery, trust evidence, and semantic rollback.
+
+Every milestone must improve at least one of: developer simplicity, understanding, verification, reliability, recoverability, replayability, collaboration, performance, or observability.
+
+## Canonical development model
 
 ```text
-Human / AI System / AI Agent Goal
-    → Collaborative Execution
-    → Sessions captures execution
-    → CodeVault preserves state
-    → Verification validates
-    → Timeline records lineage
-    → Memory persists knowledge
-    → Deployment proceeds or is blocked
-    → Replay / Recovery / Rollback
+Goal
+  → Workstream
+  → Session
+  → Checkpoint
+  → Verify
+  → Review
+  → Integrate
+  → Publish
+  → Release
+  → Deploy
+  → Replay / Recover / Restore
 ```
 
 ## Milestone 0 — Foundation
@@ -25,55 +33,160 @@ Human / AI System / AI Agent Goal
 Deliverables:
 
 - TypeScript workspace
-- shared actor and event contracts
+- actor and event contracts
 - CodeVault snapshot primitives
 - timeline recording primitives
 - verification result model
-- configuration and build scripts
-- CI-ready project structure
+- API and persistence foundation
+- Docker runtime
+- CLI, web, editor, desktop, mobile, SDK, and MCP surfaces
 - documentation source of truth
 
 Exit criteria:
 
-- the core packages compile;
+- core packages compile;
 - actor provenance distinguishes humans, AI agents, AI systems, and services;
 - snapshots are content-addressed;
-- timeline events are append-oriented and attributable.
+- timeline events are append-oriented and attributable;
+- product surfaces consume one platform contract.
 
-## Milestone 1 — First real Session
-
-Deliverables:
-
-- Session lifecycle
-- objective recording
-- repository baseline
-- actor identities
-- prompt/model metadata
-- command/tool events
-- file-change events
-- chronological timeline
-
-Exit criteria:
-
-A human, AI agent, or AI system can start a Session, perform work, and inspect an attributable execution history.
-
-## Milestone 2 — CodeVault
+## Milestone 1 — Sessions-Native Repository Engine
 
 Deliverables:
 
-- immutable snapshot manifests
-- SHA-256 integrity
-- checkpoint creation
-- snapshot object storage adapter
-- repository state reconstruction
-- rollback targets
-- restoration verification
+- repository object model
+- local repository format under `.sessions/`
+- content-addressed source object store
+- repository manifest
+- file-state scanner
+- change detection
+- Workstream model
+- Checkpoint graph
+- friendly Checkpoint names plus immutable IDs
+- local history
+- repository status
+- ignore rules
+- repository integrity verification
 
 Exit criteria:
 
-Sessions can restore a known repository state and verify that the restored content matches the recorded snapshot.
+A developer can initialize a Sessions repository, modify files, inspect changes, create native Checkpoints, and browse history without another source-control system.
 
-## Milestone 3 — Verification
+## Milestone 2 — Native Checkpoints + History
+
+Deliverables:
+
+- automatic change grouping
+- Checkpoint creation
+- parent relationships
+- semantic metadata
+- actor attribution
+- objective linkage
+- verification attachment
+- Checkpoint lifecycle: Draft → Verified → Reviewed → Approved → Published
+- restore targets
+- product-history views
+- full execution-history preservation
+
+Exit criteria:
+
+Sessions preserves full execution truth while presenting clean, meaningful development history.
+
+## Milestone 3 — Workstreams
+
+Deliverables:
+
+- create/switch/list Workstreams
+- objective-bound work
+- independent state heads
+- Workstream progress
+- actor participation
+- overlapping-work detection
+- Workstream comparison
+- local Workstream synchronization model
+
+Exit criteria:
+
+Developers can isolate and coordinate parallel work without managing low-level source-control mechanics as the primary workflow.
+
+## Milestone 4 — Native Diff + Semantic Change
+
+Deliverables:
+
+- file additions/removals/modifications
+- text and binary change metadata
+- raw source difference viewer
+- semantic change summaries
+- affected components
+- dependency impact
+- risk indicators
+- source/semantic comparison between Checkpoints and Workstreams
+
+Exit criteria:
+
+Developers can understand both exactly what changed and what the change means to the system.
+
+## Milestone 5 — Native Integration
+
+Deliverables:
+
+- integrate Workstream into target
+- source conflict detection
+- semantic conflict detection
+- verification prerequisites
+- overlapping-work analysis
+- policy checks
+- recovery readiness
+- integration preview
+- atomic integration record
+
+Exit criteria:
+
+Sessions can combine independent work safely while explaining conflicts before asking a developer to resolve them.
+
+## Milestone 6 — Publish + Distributed Synchronization
+
+Deliverables:
+
+- local identity
+- hosted repository identity
+- publish protocol
+- pull/sync protocol
+- object negotiation
+- missing-object transfer
+- Checkpoint graph synchronization
+- concurrent update detection
+- resumable transfer
+- integrity verification
+- offline-first reconciliation
+
+Exit criteria:
+
+Two Sessions installations can exchange repository state and history reliably without shared local storage.
+
+## Milestone 7 — Hosted Collaboration Platform
+
+Deliverables:
+
+- authentication
+- organizations
+- teams
+- RBAC and capability-scoped authority
+- hosted repositories
+- Work Items
+- Change Reviews
+- approvals
+- activity feed
+- notifications
+- search
+- audit history
+- developer, AI-system, and AI-agent identities
+
+Exit criteria:
+
+A team can build and collaborate entirely within Sessions.
+
+## Milestone 8 — Verification Platform
 
 Deliverables:
 
@@ -82,192 +195,175 @@ Deliverables:
 - type-check adapter
 - test adapter
 - build adapter
-- security-hook interface
+- security checks
+- policy gates
 - verification evidence
 - release gates
-- rollback-confidence evidence
+- recovery-confidence evidence
+- verification progress UI
 
 Exit criteria:
 
-Sessions can explain why an execution state is accepted, rejected, or requires human review.
+Sessions can explain why a Checkpoint or integrated state is accepted, rejected, or requires review.
 
-## Milestone 4 — Timeline + Replay
+## Milestone 9 — Timeline + Replay
 
 Deliverables:
 
 - persisted event stream
+- actor contribution history
 - event ordering
-- session reconstruction
+- Session reconstruction
 - replay planner
 - replay result evidence
 - timeline UI/API
 - failure navigation
+- progress milestones
 
 Exit criteria:
 
 A developer can answer: "How did this system reach its current state?"
 
-## Milestone 5 — Semantic Engine
+## Milestone 10 — Semantic Engine + Memory
 
 Deliverables:
 
 - repository indexing
 - component discovery
 - dependency graph
-- semantic change summaries
-- affected-area analysis
 - architecture relationships
+- semantic change summaries
 - risk signals
-
-Exit criteria:
-
-Sessions explains the system-level significance of a change rather than only listing changed files.
-
-## Milestone 6 — Memory Graph
-
-Deliverables:
-
 - architecture decisions
 - repository conventions
 - known failures
 - successful fixes
-- semantic relationships
-- retrieval into later Sessions
 - memory provenance and confidence
 
 Exit criteria:
 
-Relevant engineering knowledge survives beyond an individual conversation or execution.
+Sessions understands development history as engineering knowledge, not only file history.
 
-## Milestone 7 — Execution Runtime
+## Milestone 11 — Execution Runtime
 
 Deliverables:
 
+- human execution identity
 - AI-system execution identity
 - AI-agent execution identity
-- human execution identity
 - model/provider abstraction
 - tool authorization
-- sandbox command execution
+- capability-scoped permissions
+- sandbox execution
 - multi-actor workflows
 - approval gates
 - execution budgets and cancellation
 
 Exit criteria:
 
-Mixed human/AI workflows are first-class and fully attributable.
+Mixed human/AI development is first-class, attributable, governed, and recoverable.
 
-## Milestone 8 — Deployment Runtime
+## Milestone 12 — Releases + Deployment
 
 Deliverables:
 
+- releases
+- packages/artifacts
 - environments
-- preview deployment hooks
+- preview deployment
 - deployment events
 - health checks
 - release evidence
-- rollback deploys
+- restore deploys
 - post-deployment verification
 
 Exit criteria:
 
-Sessions connects execution history to deployed state and can recover from a failed release.
+Sessions connects development state to deployed state and can safely recover from failed releases.
 
-## Milestone 9 — Hosted Commercial Beta
+## Milestone 13 — Commercial Beta
 
 Deliverables:
 
-- authentication
-- organizations/workspaces
-- teams
-- RBAC
-- API keys
-- GitHub App integration
-- hosted persistence
-- usage metering
 - billing
-- onboarding
-- quotas and rate limits
+- usage metering
+- quotas
+- rate limits
 - backups
+- onboarding
 - operational dashboards
+- account administration
+- hosted runners
+- production support workflow
 
 Exit criteria:
 
-External users can sign up, connect a repository, create Sessions, inspect execution history, verify work, and pay for hosted service.
+External users can create native Sessions repositories, collaborate, verify, publish, deploy, recover, and pay for the service.
 
-## Milestone 10 — Scale and Enterprise
+## Milestone 14 — Scale and Enterprise
 
 Deliverables:
 
 - enterprise SSO
-- policy controls
+- advanced policy controls
 - audit export
 - retention controls
 - private runners
 - organization-wide memory
 - advanced verification
 - compliance evidence
-- multi-region architecture where justified by load
+- horizontal scaling
+- multi-region architecture only where real load requires it
 
-## CLI progression
+## CLI direction
 
-Initial:
+Canonical native commands:
 
 ```bash
 sessions init
-sessions import
-sessions start
+sessions status
+sessions workstream create
+sessions workstream switch
 sessions checkpoint
+sessions history
+sessions diff
 sessions verify
+sessions review
+sessions integrate
+sessions publish
+sessions sync
 sessions timeline
 sessions replay
-sessions rollback
-```
-
-Later:
-
-```bash
+sessions restore
+sessions release
 sessions deploy
-sessions memory
-sessions agents
-sessions systems
 ```
 
-## Launch demo
+The CLI should avoid exposing low-level bookkeeping when Sessions can infer it safely.
+
+## Launch acceptance test
+
+A developer can:
 
 ```text
-Human/AI workflow receives task
-    → modifies repository
-    → subtle regression introduced
-    → Sessions captures execution
-    → Verification detects regression
-    → Timeline shows causal sequence
-    → replay reconstructs execution
-    → rollback restores stable state
+Install Sessions
+  → initialize a native repository
+  → create a Workstream
+  → make changes
+  → watch progress/activity
+  → create a Checkpoint
+  → verify it
+  → review it
+  → integrate it
+  → publish it
+  → collaborate with another user
+  → release/deploy it
+  → replay its history
+  → restore a known-good state
 ```
 
-## Distribution
+No external source-control or collaboration platform is required.
 
-Launch channels include developer communities, GitHub, Product Hunt, Hacker News, Reddit, X, YouTube, and AI-coding communities. Content should demonstrate failure → understanding → recovery rather than generic feature announcements.
+## Product rule
 
-## Open-core boundary
-
-Open:
-
-- CLI
-- local event capture
-- actor/event specification
-- snapshot fundamentals
-- basic verification adapters
-- SDK/integration contracts
-
-Commercial:
-
-- hosted collaboration
-- enterprise governance
-- advanced semantic intelligence
-- organizational memory
-- hosted runners
-- deployment infrastructure
-- large-scale orchestration
-- advanced audit/compliance capabilities
+**Preserve the capabilities developers need. Redesign unnecessary friction.**
