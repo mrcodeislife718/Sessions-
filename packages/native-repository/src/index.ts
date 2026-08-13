@@ -284,10 +284,23 @@ export function diffEntries(before: SourceEntry[], after: SourceEntry[]): Source
   return changes;
 }
 
-async function headEntries(root: string, workstream = await getActiveWorkstream(root)): Promise<SourceEntry[]> {
-  if (!workstream.headCheckpointId) return [];
-  const checkpoint = await getCheckpoint(root, workstream.headCheckpointId);
-  return (await getSourceManifest(root, checkpoint.sourceManifestId)).entries;
+async function headEntries(
+  root: string,
+  workstream?: WorkstreamRecord
+): Promise<SourceEntry[]> {
+  const resolvedWorkstream =
+    workstream ?? await getActiveWorkstream(root);
+
+  if (!resolvedWorkstream.headCheckpointId) return [];
+
+  const checkpoint = await getCheckpoint(
+    root,
+    resolvedWorkstream.headCheckpointId
+  );
+
+  return (
+    await getSourceManifest(root, checkpoint.sourceManifestId)
+  ).entries;
 }
 
 function applyStage(base: SourceEntry[], staged: StagedRecord[]): SourceEntry[] {
