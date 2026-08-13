@@ -1,23 +1,26 @@
-export type ActorType = "human" | "ai_agent" | "ai_system" | "service";
+export type ActorKind = "human" | "ai_agent" | "ai_system" | "service";
+
+export type Actor = {
+  id: string;
+  kind: ActorKind;
+  displayName: string;
+  provider?: string;
+  model?: string;
+};
 
 export type StartSessionInput = {
-  projectId: string;
+  workspaceId?: string;
+  projectId?: string;
   repositoryId: string;
   objective: string;
-  actor: { id: string; type: ActorType; displayName: string };
+  actor?: Actor;
 };
 
-export type SessionRecord = StartSessionInput & {
-  id: string;
-  status: "active" | "completed" | "failed" | "rolled_back";
-  startedAt: string;
-};
-
-export type SessionEventInput = {
-  sessionId: string;
-  type: string;
-  actor: { id: string; type: ActorType; displayName: string };
-  payload?: Record<string, unknown>;
+export type SessionAggregate = {
+  session: Record<string, unknown>;
+  events: Array<Record<string, unknown>>;
+  snapshots: Array<Record<string, unknown>>;
+  verifications: Array<Record<string, unknown>>;
 };
 
 export interface SessionsTransport {
@@ -32,33 +35,59 @@ export class FetchTransport implements SessionsTransport {
     headers.set("content-type", "application/json");
     if (this.apiKey) headers.set("authorization", `Bearer ${this.apiKey}`);
     const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers });
-    if (!response.ok) throw new Error(`Sessions API ${response.status}: ${await response.text()}`);
-    return response.json() as Promise<T>;
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Sessions API ${response.status}: ${text}`);
+    return (text ? JSON.parse(text) : {}) as T;
   }
 }
 
 export class SessionsClient {
   constructor(private readonly transport: SessionsTransport) {}
 
-  startSession(input: StartSessionInput) {
-    return this.transport.request<SessionRecord>("/v1/sessions", {
-      method: "POST",
-      body: JSON.stringify(input)
-    });
+  listSessions() {
+    return this.transport.request<Array<Record<string, unknown>>>("/api/sessions");
   }
 
-  appendEvent(input: SessionEventInput) {
-    return this.transport.request<{ id: string; accepted: true }>(`/v1/sessions/${input.sessionId}/events`, {
+  startSession(input: StartSessionInput) {
+    return this.transport.request<SessionAggregate>("/api/sessions", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
     });
   }
 
   getSession(id: string) {
-    return this.transport.request<SessionRecord>(`/v1/sessions/${id}`);
+    return this.transport.request<SessionAggregate>(`/api/sessions/${id}`);
   }
 
-  getTimeline(id: string) {
-    return this.transport.request<{ sessionId: string; events: unknown[] }>(`/v1/sessions/${id}/timeline`);
+  appendEvent(id: string, type: string, payload: Record<string, unknown> = {}, actor?: Actor) {
+    return this.transport.request<Record<string, unknown>>(`/api/sessions/${id}/events`, {
+      method: "POST",
+      body: JSON.stringify({ type, payload, actor }),
+    });
+  }
+
+  createSnapshot(id: string, entries: Array<{ path: string; contentHash: string; size: number }>, actor?: Actor) {
+    return this.transport.request<Record<string, unknown>>(`/api/sessions/${id}/snapshots`, {
+      method: "POST",
+      body: JSON.stringify({ entries, actor }),
+    });
+  }
+
+  recordVerification(id: string, input: { kind: string; status: string; summary: string; snapshotId?: string; actor?: Actor }) {
+    return this.transport.request<Record<string, unknown>>(`/api/sessions/${id}/verifications`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  replay(id: string) {
+    return this.transport.request<Record<string, unknown>>(`/api/sessions/${id}/replay`, { method: "POST", body: "{}" });
+  }
+
+  rollback(id: string, snapshotId: string, actor?: Actor) {
+    return this.transport.request<Record<string, unknown>>(`/api/sessions/${id}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ snapshotId, actor }),
+    });
   }
 }
