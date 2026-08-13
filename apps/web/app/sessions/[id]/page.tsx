@@ -1,93 +1,98 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
-const timeline = [
-  { time: "10:41:08", actor: "Charles", type: "human", title: "Started Session", detail: "Objective: Fix auth regression without changing public session behavior." },
-  { time: "10:41:19", actor: "Planner", type: "ai-system", title: "Created execution plan", detail: "Inspect refresh-token path, reproduce regression, patch smallest affected surface, verify." },
-  { time: "10:41:43", actor: "Investigator", type: "ai-agent", title: "Inspected repository", detail: "Read 18 files and traced session refresh through auth middleware and token rotation." },
-  { time: "10:42:03", actor: "Implementer", type: "ai-agent", title: "Changed 3 files", detail: "Modified auth/session.ts, auth/refresh.ts, and refresh.spec.ts." },
-  { time: "10:42:34", actor: "Sessions", type: "service", title: "Verification failed", detail: "7/9 checks passed. Two refresh-token integration tests failed." },
-  { time: "10:42:36", actor: "Sessions", type: "service", title: "Stable checkpoint found", detail: "snap_8f31a2 is verified and available as a rollback target." },
-];
+export const dynamic = "force-dynamic";
 
-const checks = [
-  ["Lint", "Passed", "418 ms"],
-  ["Typecheck", "Passed", "1.2 s"],
-  ["Unit tests", "Passed", "3.8 s"],
-  ["Integration tests", "Failed", "6.4 s"],
-  ["Build", "Passed", "8.1 s"],
-  ["Security", "Passed", "722 ms"],
-];
+type Aggregate = {
+  session: { id: string; repository_id: string; objective: string; status: string; created_at: string };
+  events: Array<{ id: string; type: string; occurred_at: string; actor: { displayName?: string; display_name?: string; kind?: string }; payload: Record<string, unknown> }>;
+  snapshots: Array<{ id: string; digest: string; created_at: string; manifest: Record<string, unknown> }>;
+  verifications: Array<{ id: string; kind: string; status: string; summary: string; finished_at: string }>;
+};
+
+async function getSession(id: string): Promise<Aggregate | null> {
+  const api = process.env.SESSIONS_API_URL ?? "http://localhost:4000";
+  try {
+    const response = await fetch(`${api}/api/sessions/${id}`, { cache: "no-store" });
+    if (response.status === 404) return null;
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
+}
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const aggregate = await getSession(id);
+  if (!aggregate) notFound();
+  const { session, events, snapshots, verifications } = aggregate;
+  const failed = verifications.filter((item) => item.status !== "passed");
+  const latestSnapshot = snapshots[0];
 
   return (
     <main className="session-page">
       <header className="session-topbar">
         <Link href="/dashboard" className="brand"><span className="brand-mark">S</span><span>Sessions</span></Link>
-        <div className="session-top-actions"><span className="capture-live"><i></i> Capture connected</span><button className="button button-secondary">Share</button></div>
+        <div className="session-top-actions"><span className="capture-live"><i></i> API connected</span><Link href="/dashboard" className="button button-secondary">Workspace</Link></div>
       </header>
 
       <section className="session-header section-narrow">
         <div className="breadcrumb"><Link href="/dashboard">Sessions</Link> / {id}</div>
-        <div className="session-title-row">
-          <div><h1>Fix auth regression</h1><p>acme/web · fix/session-refresh · started 8 minutes ago</p></div>
-          <div className="session-actions"><button className="button button-secondary">Replay</button><button className="button button-danger">Rollback</button></div>
-        </div>
+        <div className="session-title-row"><div><h1>{session.objective}</h1><p>{session.repository_id} · started {new Date(session.created_at).toLocaleString()}</p></div></div>
         <div className="session-summary-strip">
-          <div><span>Status</span><strong className="warning-text">Needs review</strong></div>
-          <div><span>Participants</span><strong>1 human · 1 AI system · 2 agents</strong></div>
-          <div><span>Changes</span><strong>3 files · +42 / −16</strong></div>
-          <div><span>Verification</span><strong>7 / 9 passed</strong></div>
-          <div><span>Rollback</span><strong className="success-text">Safe · 96%</strong></div>
+          <div><span>Status</span><strong>{session.status}</strong></div>
+          <div><span>Events</span><strong>{events.length}</strong></div>
+          <div><span>Snapshots</span><strong>{snapshots.length}</strong></div>
+          <div><span>Verification</span><strong>{verifications.length - failed.length}/{verifications.length} passed</strong></div>
+          <div><span>Rollback</span><strong className={latestSnapshot ? "success-text" : "warning-text"}>{latestSnapshot ? "Checkpoint available" : "No checkpoint"}</strong></div>
         </div>
       </section>
 
       <section className="session-grid section-narrow">
         <div className="session-column-main">
           <article className="workspace-panel detail-panel">
-            <div className="panel-head"><div><h2>Execution timeline</h2><p>The complete attributable story of this change.</p></div><button className="text-button">View raw events</button></div>
+            <div className="panel-head"><div><h2>Execution timeline</h2><p>The persisted attributable story of this Session.</p></div></div>
             <div className="timeline">
-              {timeline.map((event, index) => (
-                <div className="timeline-event" key={`${event.time}-${event.title}`}>
-                  <div className={`actor-dot actor-${event.type}`}>{index + 1}</div>
-                  <time>{event.time}</time>
-                  <div className="event-copy"><strong>{event.title}</strong><span>{event.actor} · {event.type.replace("-", " ")}</span><p>{event.detail}</p></div>
-                </div>
-              ))}
+              {events.length === 0 ? <p>No events captured yet.</p> : events.map((event, index) => {
+                const actor = event.actor ?? {};
+                const display = actor.displayName ?? actor.display_name ?? "Unknown actor";
+                const kind = actor.kind ?? "unknown";
+                return (
+                  <div className="timeline-event" key={event.id}>
+                    <div className={`actor-dot actor-${String(kind).replace("_", "-")}`}>{index + 1}</div>
+                    <time>{new Date(event.occurred_at).toLocaleTimeString()}</time>
+                    <div className="event-copy"><strong>{event.type}</strong><span>{display} · {String(kind).replace("_", " ")}</span><p>{JSON.stringify(event.payload)}</p></div>
+                  </div>
+                );
+              })}
             </div>
           </article>
 
           <article className="workspace-panel detail-panel">
-            <div className="panel-head"><div><h2>Changes</h2><p>Semantic summary before raw diff.</p></div><span className="risk-badge">Medium risk</span></div>
-            <div className="semantic-summary">
-              <h3>What changed</h3>
-              <p>Refresh-token rotation was tightened to reject stale token reuse. The implementation also changed when session metadata is persisted.</p>
-              <h3>Why Sessions flagged it</h3>
-              <p>The persistence timing change affects an authentication invariant used by two integration tests. No public API shape changed.</p>
-            </div>
+            <div className="panel-head"><div><h2>CodeVault snapshots</h2><p>Immutable state checkpoints recorded for recovery and reconstruction.</p></div></div>
             <div className="file-list">
-              <div><code>src/auth/session.ts</code><span className="diff-plus">+18</span><span className="diff-minus">−6</span></div>
-              <div><code>src/auth/refresh.ts</code><span className="diff-plus">+16</span><span className="diff-minus">−8</span></div>
-              <div><code>test/refresh.spec.ts</code><span className="diff-plus">+8</span><span className="diff-minus">−2</span></div>
+              {snapshots.length === 0 ? <p>No snapshots yet. Use <code>sessions checkpoint</code>.</p> : snapshots.map((snapshot) => (
+                <div key={snapshot.id}><code>{snapshot.id}</code><span>{snapshot.digest.slice(0, 12)}</span><span>{new Date(snapshot.created_at).toLocaleTimeString()}</span></div>
+              ))}
             </div>
           </article>
         </div>
 
         <aside className="session-column-side">
           <article className="workspace-panel detail-panel sticky-panel">
-            <div className="panel-head"><div><h2>Verification</h2><p>Evidence attached to this state.</p></div></div>
+            <div className="panel-head"><div><h2>Verification</h2><p>Evidence attached to this Session.</p></div></div>
             <div className="check-list">
-              {checks.map(([name, status, duration]) => (
-                <div className="check-row" key={name}><span className={status === "Passed" ? "check-pass" : "check-fail"}>{status === "Passed" ? "✓" : "!"}</span><strong>{name}</strong><span>{duration}</span></div>
+              {verifications.length === 0 ? <p>No verification evidence yet.</p> : verifications.map((check) => (
+                <div className="check-row" key={check.id}><span className={check.status === "passed" ? "check-pass" : "check-fail"}>{check.status === "passed" ? "✓" : "!"}</span><strong>{check.kind}</strong><span>{check.status}</span></div>
               ))}
             </div>
-            <div className="gate-callout"><strong>Release blocked</strong><p>Resolve or explicitly approve the failing integration evidence before deployment.</p></div>
+            {failed.length > 0 && <div className="gate-callout"><strong>Review required</strong><p>{failed.length} verification record(s) are not passing.</p></div>}
           </article>
 
           <article className="workspace-panel detail-panel">
-            <div className="panel-head"><div><h2>Recovery</h2><p>Your nearest known-good state.</p></div></div>
-            <div className="checkpoint-card"><span>Verified checkpoint</span><strong>snap_8f31a2</strong><p>Created before implementation · all 9 checks passed</p><button className="button button-secondary button-full">Preview rollback</button></div>
+            <div className="panel-head"><div><h2>Recovery</h2><p>Nearest recorded rollback target.</p></div></div>
+            {latestSnapshot ? <div className="checkpoint-card"><span>Latest checkpoint</span><strong>{latestSnapshot.id}</strong><p>Digest {latestSnapshot.digest.slice(0, 16)}…</p><code>sessions rollback {latestSnapshot.id}</code></div> : <p>Create a checkpoint before consequential changes.</p>}
           </article>
         </aside>
       </section>
