@@ -9,6 +9,9 @@
     "typecheck": "tsc -p . --noEmit",
     "start": "electron dist/main.js"
   },
+  "dependencies": {
+    "@sessions/native-repository": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "electron": "^37.0.0",
