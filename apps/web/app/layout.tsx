@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./brand.css";
+import "./workspace.css";
 
 export const metadata: Metadata = {
   title: "Sessions — Software changes. Know exactly why.",
