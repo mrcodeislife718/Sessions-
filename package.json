@@ -5,8 +5,11 @@
   "description": "AI-native source control and execution infrastructure for AI systems, AI agents, and humans.",
   "packageManager": "pnpm@10.15.0",
   "scripts": {
-    "build": "tsc -b packages/shared packages/codevault-core packages/timeline-engine packages/verification-engine",
-    "typecheck": "tsc -b packages/shared packages/codevault-core packages/timeline-engine packages/verification-engine --pretty false",
+    "dev": "pnpm --filter @sessions/web dev",
+    "build": "tsc -b packages/shared packages/codevault-core packages/timeline-engine packages/verification-engine && pnpm --filter @sessions/web build",
+    "typecheck": "tsc -b packages/shared packages/codevault-core packages/timeline-engine packages/verification-engine --pretty false && pnpm --filter @sessions/web typecheck",
+    "web:dev": "pnpm --filter @sessions/web dev",
+    "web:build": "pnpm --filter @sessions/web build",
     "clean": "tsc -b --clean"
   },
   "devDependencies": {
