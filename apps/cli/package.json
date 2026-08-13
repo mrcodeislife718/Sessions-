@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "sessions": "dist/index.js" },
+  "bin": { "sessions": "dist/entry.js" },
   "scripts": { "build": "tsc -p .", "typecheck": "tsc -p . --noEmit" },
   "dependencies": {
     "@sessions/native-repository": "workspace:*"
