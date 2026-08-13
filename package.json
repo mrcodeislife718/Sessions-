@@ -6,10 +6,14 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "dev": "pnpm --filter @sessions/web dev",
-    "build": "tsc -b packages/shared packages/codevault-core packages/timeline-engine packages/verification-engine && pnpm --filter @sessions/web build",
-    "typecheck": "tsc -b packages/shared packages/codevault-core packages/timeline-engine packages/verification-engine --pretty false && pnpm --filter @sessions/web typecheck",
+    "build": "tsc -b packages/shared packages/codevault-core packages/timeline-engine packages/verification-engine && pnpm --filter @sessions/api build && pnpm --filter @sessions/runner build && pnpm --filter @sessions/cli build && pnpm --filter @sessions/web build",
+    "typecheck": "tsc -b packages/shared packages/codevault-core packages/timeline-engine packages/verification-engine --pretty false && pnpm --filter @sessions/api typecheck && pnpm --filter @sessions/runner typecheck && pnpm --filter @sessions/cli typecheck && pnpm --filter @sessions/web typecheck",
     "web:dev": "pnpm --filter @sessions/web dev",
-    "web:build": "pnpm --filter @sessions/web build",
+    "api:dev": "pnpm --filter @sessions/api dev",
+    "runner:dev": "pnpm --filter @sessions/runner dev",
+    "cli:build": "pnpm --filter @sessions/cli build",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
     "clean": "tsc -b --clean"
   },
   "devDependencies": {
