@@ -8,6 +8,16 @@
   "main": "./dist/extension.js",
   "activationEvents": ["onStartupFinished"],
   "contributes": {
+    "configuration": {
+      "title": "Sessions",
+      "properties": {
+        "sessions.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:4000",
+          "description": "Sessions control-plane API URL"
+        }
+      }
+    },
     "commands": [
       { "command": "sessions.start", "title": "Sessions: Start Session" },
       { "command": "sessions.checkpoint", "title": "Sessions: Create Checkpoint" },
