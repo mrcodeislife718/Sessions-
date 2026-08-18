@@ -5,6 +5,8 @@ export type RequestIdentity = {
   credentialId: string;
   workspaceId: string;
   principalId: string;
+  principalKind: "human" | "service" | "ai_worker";
+  displayName: string;
   scopes: string[];
   localDevelopment?: boolean;
 };
