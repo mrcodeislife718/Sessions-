@@ -53,3 +53,35 @@ jobs:
 
       - name: Verify workspace
         run: pnpm verify
+
+  postgres-qualification:
+    name: PostgreSQL migration / backup / restore qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sessions
+          POSTGRES_PASSWORD: sessions
+          POSTGRES_DB: sessions
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Qualify migrations, persistence, backup and restore
+        run: bash scripts/qualify-postgres.sh
