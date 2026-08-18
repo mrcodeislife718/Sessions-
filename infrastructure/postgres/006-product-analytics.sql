@@ -44,8 +44,8 @@ select
   b.status as billing_status,
   s.status as subscription_status,
   s.seats,
-  s.current_period_start,
-  s.current_period_end,
+  s.period_start,
+  s.period_end,
   a.last_activity_at,
   a.sessions_started,
   a.recoveries_completed
