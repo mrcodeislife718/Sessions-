@@ -15,7 +15,6 @@ migrations=(
 )
 
 for migration in "${migrations[@]}"; do "${psql_cmd[@]}" -f "$migration"; done
-# Reapply every migration to prove restart/idempotency behavior.
 for migration in "${migrations[@]}"; do "${psql_cmd[@]}" -f "$migration"; done
 
 "${psql_cmd[@]}" <<'SQL'
@@ -49,13 +48,39 @@ SQL
 
 backup="$(mktemp -t sessions-qualification.XXXXXX.dump)"
 trap 'rm -f "$backup"' EXIT
-pg_dump "$DATABASE_URL" --format=custom --file="$backup"
+server_major="$(psql "$DATABASE_URL" -Atc "show server_version_num" | awk '{print int($1/10000)}')"
+client_major="$(pg_dump --version | awk '{print $NF}' | cut -d. -f1)"
 
+pg_dump_matched() {
+  if [[ "$server_major" == "$client_major" ]]; then
+    pg_dump "$DATABASE_URL" --format=custom --file="$backup"
+  elif command -v docker >/dev/null 2>&1; then
+    local dir file
+    dir="$(dirname "$backup")"; file="$(basename "$backup")"
+    docker run --rm --network host -e PGPASSWORD="${PGPASSWORD:-}" -v "$dir:/backup" "postgres:${server_major}" pg_dump "$DATABASE_URL" --format=custom --file="/backup/$file"
+  else
+    echo "pg_dump major version $client_major does not match server $server_major and Docker is unavailable" >&2
+    exit 1
+  fi
+}
+
+pg_restore_matched() {
+  local restore_url="$1"
+  if [[ "$server_major" == "$client_major" ]]; then
+    pg_restore --no-owner --no-privileges --dbname="$restore_url" "$backup"
+  else
+    local dir file
+    dir="$(dirname "$backup")"; file="$(basename "$backup")"
+    docker run --rm --network host -e PGPASSWORD="${PGPASSWORD:-}" -v "$dir:/backup:ro" "postgres:${server_major}" pg_restore --no-owner --no-privileges --dbname="$restore_url" "/backup/$file"
+  fi
+}
+
+pg_dump_matched
 admin_url="${DATABASE_URL%/*}/postgres"
 psql "$admin_url" -v ON_ERROR_STOP=1 -c 'drop database if exists sessions_restore_qualification;'
 psql "$admin_url" -v ON_ERROR_STOP=1 -c 'create database sessions_restore_qualification;'
 restore_url="${DATABASE_URL%/*}/sessions_restore_qualification"
-pg_restore --no-owner --no-privileges --dbname="$restore_url" "$backup"
+pg_restore_matched "$restore_url"
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select objective from sessions where id='session_qualification'" | grep -qx 'prove persistence'
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select status from verifications where id='verification_qualification'" | grep -qx 'passed'
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select outcome from audit_events where id='audit_qualification'" | grep -qx 'allowed'
