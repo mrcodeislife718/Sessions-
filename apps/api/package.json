@@ -7,7 +7,8 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p .",
     "start": "node dist/index.js",
-    "typecheck": "tsc -p . --noEmit"
+    "typecheck": "tsc -p . --noEmit",
+    "test": "npm run build && node --test dist/security.test.js"
   },
   "dependencies": {
     "@sessions/codevault-core": "workspace:*",
