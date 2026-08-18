@@ -134,8 +134,10 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/004-production-controls.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/005-commercial-operations.sql
 
-      - name: Build API
-        run: pnpm --filter @sessions/api build
+      - name: Build API and workspace dependencies
+        run: |
+          pnpm exec tsc -b packages/shared packages/codevault-core
+          pnpm --filter @sessions/api build
 
       - name: Start API
         run: |
