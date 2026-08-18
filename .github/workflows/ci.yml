@@ -85,3 +85,75 @@ jobs:
 
       - name: Qualify migrations, persistence, backup and restore
         run: bash scripts/qualify-postgres.sh
+
+  lifecycle-recovery-qualification:
+    name: lifecycle / recovery end-to-end qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sessions
+          POSTGRES_PASSWORD: sessions
+          POSTGRES_DB: sessions
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+      SESSIONS_ALLOW_INSECURE_LOCAL: "true"
+      SESSIONS_CORS_ORIGIN: http://localhost:3000
+      PORT: "4000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply production migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/init.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/002-hosted-repositories.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/003-source-storage.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/004-production-controls.sql
+
+      - name: Build API
+        run: pnpm --filter @sessions/api build
+
+      - name: Start API
+        run: |
+          node apps/api/dist/index.js > /tmp/sessions-api.log 2>&1 &
+          echo $! > /tmp/sessions-api.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4000/ready >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/sessions-api.log
+          exit 1
+
+      - name: Qualify complete lifecycle and context recovery
+        run: node scripts/qualify-lifecycle.mjs
+
+      - name: Capture API log
+        if: always()
+        run: cat /tmp/sessions-api.log || true
+
+      - name: Stop API
+        if: always()
+        run: test ! -f /tmp/sessions-api.pid || kill "$(cat /tmp/sessions-api.pid)" || true
