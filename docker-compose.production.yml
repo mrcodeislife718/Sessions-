@@ -138,6 +138,7 @@ services:
       - ./infrastructure/postgres/003-source-storage.sql:/docker-entrypoint-initdb.d/003-source-storage.sql:ro
       - ./infrastructure/postgres/004-production-controls.sql:/docker-entrypoint-initdb.d/004-production-controls.sql:ro
       - ./infrastructure/postgres/005-commercial-operations.sql:/docker-entrypoint-initdb.d/005-commercial-operations.sql:ro
+      - ./infrastructure/postgres/006-product-analytics.sql:/docker-entrypoint-initdb.d/006-product-analytics.sql:ro
     networks:
       - data
     healthcheck:
