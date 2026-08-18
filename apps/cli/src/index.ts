@@ -20,6 +20,7 @@ import {
 
 const [, , command, ...args] = process.argv;
 const api = process.env.SESSIONS_API_URL ?? "http://localhost:4000";
+const apiToken = process.env.SESSIONS_API_TOKEN?.trim();
 const root = process.cwd();
 const stateDir = join(root, ".sessions");
 const runtimeFile = join(stateDir, "runtime.json");
@@ -36,10 +37,18 @@ async function saveRuntime(state: RuntimeState) {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const response = await fetch(`${api}${path}`, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-  return body;
+  const authHeaders = apiToken ? { authorization: `Bearer ${apiToken}` } : {};
+  const response = await fetch(`${api}${path}`, {
+    ...init,
+    headers: { "content-type": "application/json", ...authHeaders, ...(init?.headers ?? {}) },
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  const body = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) {
+    const message = typeof body === "object" && body && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return body as any;
 }
 
 function requireSession(state: RuntimeState): string {
@@ -63,6 +72,7 @@ const help = `Sessions CLI
 Native source control:
   init [name]
   status
+  doctor
   work <objective>
   workstream list
   workstream create <name> [objective]
@@ -80,6 +90,10 @@ Execution + intelligence:
   timeline
   replay
   recovery <checkpoint-id>
+
+Hosted connection:
+  SESSIONS_API_URL=https://sessions.example.com
+  SESSIONS_API_TOKEN=<workspace-scoped-token>
 `;
 
 async function main() {
@@ -104,6 +118,27 @@ async function main() {
         console.log("\nChanges");
         printChanges(status.changes);
       }
+      return;
+    }
+
+    case "doctor": {
+      const checks: Array<[string, boolean, string]> = [];
+      try {
+        const repository = await openRepository(root);
+        checks.push(["repository", true, repository.id]);
+      } catch (error) {
+        checks.push(["repository", false, error instanceof Error ? error.message : String(error)]);
+      }
+      try {
+        const ready = await request("/ready");
+        checks.push(["api", Boolean(ready?.ok), `${api}${ready?.database ? ` (${ready.database})` : ""}`]);
+      } catch (error) {
+        checks.push(["api", false, error instanceof Error ? error.message : String(error)]);
+      }
+      const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/.test(api);
+      checks.push(["authentication", Boolean(apiToken) || isLocal, apiToken ? "token configured" : isLocal ? "local endpoint" : "SESSIONS_API_TOKEN is required for hosted use"]);
+      for (const [name, ok, detail] of checks) console.log(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(16)} ${detail}`);
+      if (checks.some(([, ok]) => !ok)) process.exitCode = 1;
       return;
     }
 
@@ -172,9 +207,7 @@ async function main() {
     case "history": {
       const history = await listHistory(root);
       if (!history.length) return console.log("No Checkpoints yet.");
-      for (const checkpoint of history) {
-        console.log(`◆ ${checkpoint.friendlyName}\n  ${checkpoint.id}  ${checkpoint.lifecycle}  ${checkpoint.createdAt}`);
-      }
+      for (const checkpoint of history) console.log(`◆ ${checkpoint.friendlyName}\n  ${checkpoint.id}  ${checkpoint.lifecycle}  ${checkpoint.createdAt}`);
       return;
     }
 
