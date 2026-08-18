@@ -132,6 +132,7 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/002-hosted-repositories.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/003-source-storage.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/004-production-controls.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/005-commercial-operations.sql
 
       - name: Build API
         run: pnpm --filter @sessions/api build
@@ -157,3 +158,13 @@ jobs:
       - name: Stop API
         if: always()
         run: test ! -f /tmp/sessions-api.pid || kill "$(cat /tmp/sessions-api.pid)" || true
+
+  production-config-qualification:
+    name: production deployment configuration qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate production Compose security and migration wiring
+        run: bash scripts/validate-production-config.sh
