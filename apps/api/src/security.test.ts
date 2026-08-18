@@ -12,7 +12,7 @@ const identity: RequestIdentity = {
 };
 
 test("bearer tokens are stored as deterministic SHA-256 hashes", () => {
-  assert.equal(hashBearerToken("secret-token"), "930bbdc51b6aed5c2a5678fd1ff18c5253c7df48d7b759250d9d6dc8c1b9b5b");
+  assert.equal(hashBearerToken("secret-token"), "930bbdc51b6aed5c2a5678fd6e28dee7a05e8a4b643cfc0b4427c3efb86c0d94");
   assert.notEqual(hashBearerToken("secret-token"), "secret-token");
 });
 
