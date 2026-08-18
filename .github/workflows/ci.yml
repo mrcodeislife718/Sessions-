@@ -28,10 +28,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: pnpm
 
       - name: Enable Corepack
         run: corepack enable
+
+      - name: Prepare pnpm
+        run: corepack prepare pnpm@10.15.0 --activate
+
+      - name: Resolve pnpm store
+        id: pnpm-cache
+        shell: bash
+        run: echo "store_path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.store_path }}
+          key: ${{ runner.os }}-node-${{ matrix.node }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ matrix.node }}-pnpm-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
