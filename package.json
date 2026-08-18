@@ -8,8 +8,10 @@
     "dev": "pnpm --filter @sessions/web dev",
     "build": "tsc -b packages/shared packages/codevault-core packages/native-repository packages/commercial-core packages/timeline-engine packages/verification-engine && pnpm --filter @sessions/sdk build && pnpm --filter @sessions/api build && pnpm --filter @sessions/runner build && pnpm --filter @sessions/cli build && pnpm --filter @sessions/mcp build && pnpm --filter sessions-vscode build && pnpm --filter @sessions/desktop build && pnpm --filter @sessions/web build",
     "typecheck": "tsc -b packages/shared packages/codevault-core packages/native-repository packages/commercial-core packages/timeline-engine packages/verification-engine --pretty false && pnpm --filter @sessions/sdk typecheck && pnpm --filter @sessions/api typecheck && pnpm --filter @sessions/runner typecheck && pnpm --filter @sessions/cli typecheck && pnpm --filter @sessions/mcp typecheck && pnpm --filter sessions-vscode typecheck && pnpm --filter @sessions/desktop typecheck && pnpm --filter @sessions/mobile typecheck && pnpm --filter @sessions/web typecheck",
-    "verify": "pnpm typecheck && pnpm build && node --test packages/native-repository/dist/index.test.js && pnpm test:runner",
+    "verify": "pnpm typecheck && pnpm build && node --test packages/native-repository/dist/index.test.js && pnpm test:api && pnpm test:runner",
     "test:native": "pnpm exec tsc -b packages/shared packages/codevault-core packages/native-repository && node --test packages/native-repository/dist/index.test.js",
+    "test:api": "pnpm --filter @sessions/api test",
+    "test:runner": "pnpm --filter @sessions/runner test",
     "web:dev": "pnpm --filter @sessions/web dev",
     "api:dev": "pnpm --filter @sessions/api dev",
     "runner:dev": "pnpm --filter @sessions/runner dev",
@@ -18,8 +20,7 @@
     "desktop:start": "pnpm --filter @sessions/desktop start",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
-    "clean": "tsc -b --clean",
-    "test:runner": "pnpm --filter @sessions/runner test"
+    "clean": "tsc -b --clean"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
