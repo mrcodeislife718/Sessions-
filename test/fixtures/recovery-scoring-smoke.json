@@ -1,0 +1,6 @@
+[
+  {"system":"sessions","orientationMs":400,"missingContextCount":0,"reproductionSuccess":true,"continuationReady":true,"reconstructionAccuracy":1},
+  {"system":"sessions","orientationMs":500,"missingContextCount":1,"reproductionSuccess":true,"continuationReady":true,"reconstructionAccuracy":0.95},
+  {"system":"baseline","orientationMs":1000,"missingContextCount":4,"reproductionSuccess":false,"continuationReady":false,"reconstructionAccuracy":0.60},
+  {"system":"baseline","orientationMs":1200,"missingContextCount":3,"reproductionSuccess":true,"continuationReady":false,"reconstructionAccuracy":0.70}
+]
