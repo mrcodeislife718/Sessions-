@@ -37,11 +37,10 @@ async function saveRuntime(state: RuntimeState) {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const authHeaders = apiToken ? { authorization: `Bearer ${apiToken}` } : {};
-  const response = await fetch(`${api}${path}`, {
-    ...init,
-    headers: { "content-type": "application/json", ...authHeaders, ...(init?.headers ?? {}) },
-  });
+  const headers = new Headers(init?.headers);
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  if (apiToken) headers.set("authorization", `Bearer ${apiToken}`);
+  const response = await fetch(`${api}${path}`, { ...init, headers });
   const contentType = response.headers.get("content-type") ?? "";
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {
