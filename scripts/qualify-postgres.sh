@@ -6,23 +6,17 @@ export DATABASE_URL
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 psql_cmd=(psql "$DATABASE_URL" -v ON_ERROR_STOP=1)
+migrations=(
+  "$root/infrastructure/postgres/init.sql"
+  "$root/infrastructure/postgres/002-hosted-repositories.sql"
+  "$root/infrastructure/postgres/003-source-storage.sql"
+  "$root/infrastructure/postgres/004-production-controls.sql"
+  "$root/infrastructure/postgres/005-commercial-operations.sql"
+)
 
-for migration in \
-  "$root/infrastructure/postgres/init.sql" \
-  "$root/infrastructure/postgres/002-hosted-repositories.sql" \
-  "$root/infrastructure/postgres/003-source-storage.sql" \
-  "$root/infrastructure/postgres/004-production-controls.sql"; do
-  "${psql_cmd[@]}" -f "$migration"
-done
-
-# Reapply all migrations to verify idempotent startup/migration behavior.
-for migration in \
-  "$root/infrastructure/postgres/init.sql" \
-  "$root/infrastructure/postgres/002-hosted-repositories.sql" \
-  "$root/infrastructure/postgres/003-source-storage.sql" \
-  "$root/infrastructure/postgres/004-production-controls.sql"; do
-  "${psql_cmd[@]}" -f "$migration"
-done
+for migration in "${migrations[@]}"; do "${psql_cmd[@]}" -f "$migration"; done
+# Reapply every migration to prove restart/idempotency behavior.
+for migration in "${migrations[@]}"; do "${psql_cmd[@]}" -f "$migration"; done
 
 "${psql_cmd[@]}" <<'SQL'
 insert into organizations (id, name) values ('org_qualification', 'Qualification Org') on conflict (id) do nothing;
@@ -34,9 +28,13 @@ insert into sessions (id, workspace_id, project_id, repository_id, objective) va
 insert into session_events (id, session_id, type, occurred_at, actor, payload) values ('event_qualification', 'session_qualification', 'SessionStarted', now(), '{"id":"principal_qualification","kind":"human","displayName":"Qualification User"}', '{"objective":"prove persistence"}') on conflict (id) do nothing;
 insert into snapshots (id, session_id, repository_id, digest, manifest, created_at) values ('snapshot_qualification', 'session_qualification', 'repo_qualification', 'sha256:qualification', '{"entries":[]}', now()) on conflict (id) do nothing;
 insert into verifications (id, session_id, snapshot_id, kind, status, summary, requested_by, started_at, finished_at) values ('verification_qualification', 'session_qualification', 'snapshot_qualification', 'qualification', 'passed', 'database persistence verified', '{"id":"principal_qualification","kind":"human","displayName":"Qualification User"}', now(), now()) on conflict (id) do nothing;
-insert into billing_accounts (id, workspace_id, plan_key, status) values ('billing_qualification', 'workspace_qualification', 'pro', 'active') on conflict (id) do nothing;
+insert into billing_accounts (id, workspace_id, plan_key, status) values ('billing_qualification', 'workspace_qualification', 'developer', 'active') on conflict (id) do nothing;
+insert into subscriptions (id, billing_account_id, plan_key, status, seats) values ('subscription_qualification', 'billing_qualification', 'developer', 'active', 1) on conflict (id) do nothing;
 insert into usage_events (id, billing_account_id, workspace_id, repository_id, session_id, dimension, quantity, unit, idempotency_key) values ('usage_qualification', 'billing_qualification', 'workspace_qualification', 'repo_qualification', 'session_qualification', 'runner_seconds', 1, 'second', 'qualification-usage') on conflict (id) do nothing;
 insert into audit_events (id, workspace_id, principal_id, request_id, action, resource_type, resource_id, outcome) values ('audit_qualification', 'workspace_qualification', 'principal_qualification', 'request_qualification', 'session.create', 'session', 'session_qualification', 'allowed') on conflict (id) do nothing;
+insert into product_events (id, workspace_id, principal_id, event_name, session_id, repository_id, properties) values ('product_qualification', 'workspace_qualification', 'principal_qualification', 'recovery_completed', 'session_qualification', 'repo_qualification', '{"source":"qualification"}') on conflict (id) do nothing;
+insert into recovery_experiments (id, workspace_id, session_id, experiment_kind, baseline_kind, orientation_ms, missing_context_count, reproduction_success, continuation_ready, reconstruction_accuracy) values ('recovery_qualification', 'workspace_qualification', 'session_qualification', 'cross_environment', 'git_plus_chat', 1, 0, true, true, 1.0) on conflict (id) do nothing;
+insert into workspace_limits (workspace_id, hosted_repository_limit, runner_seconds_monthly_limit, storage_bytes_limit) values ('workspace_qualification', 10, 10000, 1073741824) on conflict (workspace_id) do nothing;
 
 DO $$
 BEGIN
@@ -44,6 +42,8 @@ BEGIN
   IF (select count(*) from session_events where session_id='session_qualification') <> 1 THEN RAISE EXCEPTION 'event persistence assertion failed'; END IF;
   IF (select count(*) from workspace_memberships where workspace_id='workspace_qualification') <> 1 THEN RAISE EXCEPTION 'tenancy assertion failed'; END IF;
   IF (select count(*) from usage_events where workspace_id='workspace_qualification') <> 1 THEN RAISE EXCEPTION 'usage assertion failed'; END IF;
+  IF (select count(*) from product_events where workspace_id='workspace_qualification') <> 1 THEN RAISE EXCEPTION 'product telemetry assertion failed'; END IF;
+  IF (select count(*) from recovery_experiments where continuation_ready is true) <> 1 THEN RAISE EXCEPTION 'recovery proof assertion failed'; END IF;
 END $$;
 SQL
 
@@ -51,7 +51,6 @@ backup="$(mktemp -t sessions-qualification.XXXXXX.dump)"
 trap 'rm -f "$backup"' EXIT
 pg_dump "$DATABASE_URL" --format=custom --file="$backup"
 
-# Restore into an independent database to prove backup portability.
 admin_url="${DATABASE_URL%/*}/postgres"
 psql "$admin_url" -v ON_ERROR_STOP=1 -c 'drop database if exists sessions_restore_qualification;'
 psql "$admin_url" -v ON_ERROR_STOP=1 -c 'create database sessions_restore_qualification;'
@@ -60,5 +59,6 @@ pg_restore --no-owner --no-privileges --dbname="$restore_url" "$backup"
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select objective from sessions where id='session_qualification'" | grep -qx 'prove persistence'
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select status from verifications where id='verification_qualification'" | grep -qx 'passed'
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select outcome from audit_events where id='audit_qualification'" | grep -qx 'allowed'
+psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select continuation_ready from recovery_experiments where id='recovery_qualification'" | grep -qx 't'
 
-echo 'PostgreSQL qualification passed: fresh migrations, idempotent reapply, persistence, backup, and independent restore.'
+echo 'PostgreSQL qualification passed: fresh migrations, idempotent reapply, persistence, commercial telemetry, backup, and independent restore.'
