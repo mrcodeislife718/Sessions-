@@ -48,10 +48,13 @@ BEGIN
 END $$;
 SQL
 
-backup="$(mktemp -t sessions-qualification.XXXXXX.dump)"
-trap 'rm -f "$backup"' EXIT
+backup_dir="$(mktemp -d -t sessions-qualification.XXXXXX)"
+backup="$backup_dir/sessions.dump"
+trap 'rm -rf "$backup_dir"' EXIT
 server_major="$(psql "$DATABASE_URL" -Atc "show server_version_num" | awk '{print int($1/10000)}')"
 client_major="$(pg_dump --version | awk '{print $NF}' | cut -d. -f1)"
+host_uid="$(id -u)"
+host_gid="$(id -g)"
 
 pg_dump_matched() {
   if [[ "$server_major" == "$client_major" ]]; then
@@ -59,7 +62,7 @@ pg_dump_matched() {
   elif command -v docker >/dev/null 2>&1; then
     local dir file
     dir="$(dirname "$backup")"; file="$(basename "$backup")"
-    docker run --rm --network host -e PGPASSWORD="${PGPASSWORD:-}" -v "$dir:/backup" "postgres:${server_major}" pg_dump "$DATABASE_URL" --format=custom --file="/backup/$file"
+    docker run --rm --user "$host_uid:$host_gid" --network host -e PGPASSWORD="${PGPASSWORD:-}" -v "$dir:/backup" "postgres:${server_major}" pg_dump "$DATABASE_URL" --format=custom --file="/backup/$file"
   else
     echo "pg_dump major version $client_major does not match server $server_major and Docker is unavailable" >&2
     exit 1
@@ -73,11 +76,12 @@ pg_restore_matched() {
   else
     local dir file
     dir="$(dirname "$backup")"; file="$(basename "$backup")"
-    docker run --rm --network host -e PGPASSWORD="${PGPASSWORD:-}" -v "$dir:/backup:ro" "postgres:${server_major}" pg_restore --no-owner --no-privileges --dbname="$restore_url" "/backup/$file"
+    docker run --rm --user "$host_uid:$host_gid" --network host -e PGPASSWORD="${PGPASSWORD:-}" -v "$dir:/backup:ro" "postgres:${server_major}" pg_restore --no-owner --no-privileges --dbname="$restore_url" "/backup/$file"
   fi
 }
 
 pg_dump_matched
+test -s "$backup"
 admin_url="${DATABASE_URL%/*}/postgres"
 psql "$admin_url" -v ON_ERROR_STOP=1 -c 'drop database if exists sessions_restore_qualification;'
 psql "$admin_url" -v ON_ERROR_STOP=1 -c 'create database sessions_restore_qualification;'
