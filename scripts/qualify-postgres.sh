@@ -12,6 +12,7 @@ migrations=(
   "$root/infrastructure/postgres/003-source-storage.sql"
   "$root/infrastructure/postgres/004-production-controls.sql"
   "$root/infrastructure/postgres/005-commercial-operations.sql"
+  "$root/infrastructure/postgres/006-product-analytics.sql"
 )
 
 for migration in "${migrations[@]}"; do "${psql_cmd[@]}" -f "$migration"; done
@@ -43,6 +44,7 @@ BEGIN
   IF (select count(*) from usage_events where workspace_id='workspace_qualification') <> 1 THEN RAISE EXCEPTION 'usage assertion failed'; END IF;
   IF (select count(*) from product_events where workspace_id='workspace_qualification') <> 1 THEN RAISE EXCEPTION 'product telemetry assertion failed'; END IF;
   IF (select count(*) from recovery_experiments where continuation_ready is true) <> 1 THEN RAISE EXCEPTION 'recovery proof assertion failed'; END IF;
+  IF (select count(*) from recovery_proof_summary) <> 1 THEN RAISE EXCEPTION 'recovery analytics view assertion failed'; END IF;
 END $$;
 SQL
 
@@ -85,5 +87,6 @@ psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select objective from sessions wher
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select status from verifications where id='verification_qualification'" | grep -qx 'passed'
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select outcome from audit_events where id='audit_qualification'" | grep -qx 'allowed'
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select continuation_ready from recovery_experiments where id='recovery_qualification'" | grep -qx 't'
+psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select experiments from recovery_proof_summary" | grep -qx '1'
 
-echo 'PostgreSQL qualification passed: fresh migrations, idempotent reapply, persistence, commercial telemetry, backup, and independent restore.'
+echo 'PostgreSQL qualification passed: migrations, analytics, idempotent reapply, persistence, commercial telemetry, backup, and independent restore.'
