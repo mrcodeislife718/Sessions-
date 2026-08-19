@@ -45,6 +45,7 @@ async function jsonBody(req: http.IncomingMessage): Promise<any> {
 function tokenHash(token: string) { return createHash("sha256").update(token).digest("hex"); }
 function hasScope(identity: Identity, scope: string) { return identity.scopes.includes("*") || identity.scopes.includes(scope); }
 function requireScope(identity: Identity, scope: string) { if (!hasScope(identity, scope)) throw new HttpError(403, `missing scope: ${scope}`); }
+function stripeEventTime(event: StripeEvent) { return new Date((event.created ?? Math.floor(Date.now() / 1000)) * 1000); }
 
 async function authenticate(req: http.IncomingMessage): Promise<Identity> {
   const auth = req.headers.authorization;
@@ -69,13 +70,14 @@ async function billingAccount(db: Db, workspaceId: string) {
   return result.rows[0];
 }
 
-async function setEntitlement(db: Db, workspaceId: string, planKey: string, status: string, reason: string | null) {
+async function setEntitlement(db: Db, workspaceId: string, planKey: string, status: string, reason: string | null, eventCreatedAt: Date) {
   await db.query(
-    `insert into workspace_entitlements(workspace_id,plan_key,status,source,reason,effective_at,updated_at)
-     values($1,$2,$3,'stripe',$4,now(),now())
+    `insert into workspace_entitlements(workspace_id,plan_key,status,source,reason,effective_at,source_event_created_at,updated_at)
+     values($1,$2,$3,'stripe',$4,now(),$5,now())
      on conflict(workspace_id) do update
-       set plan_key=excluded.plan_key,status=excluded.status,source='stripe',reason=excluded.reason,effective_at=now(),updated_at=now()`,
-    [workspaceId, planKey, status, reason],
+       set plan_key=excluded.plan_key,status=excluded.status,source='stripe',reason=excluded.reason,effective_at=now(),source_event_created_at=excluded.source_event_created_at,updated_at=now()
+     where workspace_entitlements.source_event_created_at is null or workspace_entitlements.source_event_created_at <= excluded.source_event_created_at`,
+    [workspaceId, planKey, status, reason, eventCreatedAt],
   );
 }
 
@@ -102,45 +104,59 @@ async function resolveWorkspace(db: Db, object: any) {
   return { workspaceId, planKey: planKey ?? "developer", subscriptionId, customerId };
 }
 
-async function upsertSubscription(db: Db, accountId: string, planKey: string, subscriptionId: string, object: any, eventType: string) {
+async function upsertSubscription(db: Db, accountId: string, planKey: string, subscriptionId: string, object: any, eventType: string, eventCreatedAt: Date) {
   const status = object.status ?? (eventType === "customer.subscription.deleted" ? "canceled" : "active");
   const periodStart = object.current_period_start ? new Date(object.current_period_start * 1000) : null;
   const periodEnd = object.current_period_end ? new Date(object.current_period_end * 1000) : null;
   const canceledAt = object.canceled_at ? new Date(object.canceled_at * 1000) : null;
   await db.query(
-    `insert into subscriptions(id,billing_account_id,plan_key,status,seats,external_subscription_ref,period_start,period_end,cancel_at_period_end,canceled_at)
-     values($1,$2,$3,$4,1,$5,$6,$7,$8,$9)
+    `insert into subscriptions(id,billing_account_id,plan_key,status,seats,external_subscription_ref,period_start,period_end,cancel_at_period_end,canceled_at,last_stripe_event_created_at)
+     values($1,$2,$3,$4,1,$5,$6,$7,$8,$9,$10)
      on conflict(id) do update
        set plan_key=excluded.plan_key,status=excluded.status,external_subscription_ref=excluded.external_subscription_ref,
            period_start=coalesce(excluded.period_start,subscriptions.period_start),period_end=coalesce(excluded.period_end,subscriptions.period_end),
-           cancel_at_period_end=excluded.cancel_at_period_end,canceled_at=coalesce(excluded.canceled_at,subscriptions.canceled_at),updated_at=now()`,
-    [`stripe_${subscriptionId}`, accountId, planKey, status, subscriptionId, periodStart, periodEnd, Boolean(object.cancel_at_period_end), canceledAt],
+           cancel_at_period_end=excluded.cancel_at_period_end,canceled_at=coalesce(excluded.canceled_at,subscriptions.canceled_at),
+           last_stripe_event_created_at=excluded.last_stripe_event_created_at,updated_at=now()
+     where subscriptions.last_stripe_event_created_at is null or subscriptions.last_stripe_event_created_at <= excluded.last_stripe_event_created_at`,
+    [`stripe_${subscriptionId}`, accountId, planKey, status, subscriptionId, periodStart, periodEnd, Boolean(object.cancel_at_period_end), canceledAt, eventCreatedAt],
+  );
+}
+
+async function updateBillingState(db: Db, accountId: string, eventCreatedAt: Date, values: { planKey?: string; paymentState?: string; status?: string; customerId?: string }) {
+  await db.query(
+    `update billing_accounts
+        set plan_key=coalesce($2,plan_key),
+            payment_state=coalesce($3,payment_state),
+            status=coalesce($4,status),
+            external_provider=case when $5::text is null then external_provider else 'stripe' end,
+            external_customer_ref=coalesce($5,external_customer_ref),
+            last_stripe_event_created_at=$6,
+            updated_at=now()
+      where id=$1 and (last_stripe_event_created_at is null or last_stripe_event_created_at <= $6)`,
+    [accountId, values.planKey ?? null, values.paymentState ?? null, values.status ?? null, values.customerId ?? null, eventCreatedAt],
   );
 }
 
 async function reconcileStripeEvent(db: Db, event: StripeEvent) {
   const object = event.data.object;
+  const eventCreatedAt = stripeEventTime(event);
   const { workspaceId, planKey, subscriptionId, customerId } = await resolveWorkspace(db, object);
   if (!workspaceId) return;
   const account = await billingAccount(db, workspaceId);
 
-  if (customerId) {
-    await db.query("update billing_accounts set external_provider='stripe',external_customer_ref=$2,updated_at=now() where id=$1", [account.id, customerId]);
-  }
-
   if (subscriptionId && (object.id?.startsWith?.("sub_") || event.type === "checkout.session.completed")) {
-    await upsertSubscription(db, account.id, planKey, subscriptionId, object, event.type);
+    await upsertSubscription(db, account.id, planKey, subscriptionId, object, event.type, eventCreatedAt);
   }
 
   if (event.type === "invoice.payment_failed") {
-    await db.query("update billing_accounts set payment_state='failed',status='past_due',updated_at=now() where id=$1", [account.id]);
-    await setEntitlement(db, workspaceId, planKey, "payment_failed", event.type);
+    await updateBillingState(db, account.id, eventCreatedAt, { customerId, paymentState: "failed", status: "past_due" });
+    await setEntitlement(db, workspaceId, planKey, "payment_failed", event.type, eventCreatedAt);
     return;
   }
 
   if (event.type === "customer.subscription.deleted") {
-    await db.query("update billing_accounts set status='canceled',updated_at=now() where id=$1", [account.id]);
-    await setEntitlement(db, workspaceId, planKey, "canceled", event.type);
+    await updateBillingState(db, account.id, eventCreatedAt, { customerId, status: "canceled" });
+    await setEntitlement(db, workspaceId, planKey, "canceled", event.type, eventCreatedAt);
     return;
   }
 
@@ -149,11 +165,8 @@ async function reconcileStripeEvent(db: Db, event: StripeEvent) {
     const entitlementStatus = ["active", "trialing", "complete", "paid"].includes(sourceStatus)
       ? "active"
       : sourceStatus === "past_due" ? "payment_failed" : "suspended";
-    await db.query(
-      "update billing_accounts set plan_key=$2,payment_state=$3,status=$4,updated_at=now() where id=$1",
-      [account.id, planKey, entitlementStatus === "active" ? "ok" : "failed", sourceStatus],
-    );
-    await setEntitlement(db, workspaceId, planKey, entitlementStatus, event.type);
+    await updateBillingState(db, account.id, eventCreatedAt, { customerId, planKey, paymentState: entitlementStatus === "active" ? "ok" : "failed", status: sourceStatus });
+    await setEntitlement(db, workspaceId, planKey, entitlementStatus, event.type, eventCreatedAt);
   }
 }
 
@@ -161,9 +174,10 @@ async function handleStripeEvent(event: StripeEvent): Promise<"processed" | "dup
   const client = await pool.connect();
   try {
     await client.query("begin");
+    const eventCreatedAt = stripeEventTime(event);
     const inserted = await client.query(
-      "insert into stripe_events(id,event_type,livemode,payload) values($1,$2,$3,$4) on conflict(id) do nothing returning id",
-      [event.id, event.type, Boolean(event.livemode), JSON.stringify(event)],
+      "insert into stripe_events(id,event_type,livemode,event_created_at,payload) values($1,$2,$3,$4,$5) on conflict(id) do nothing returning id",
+      [event.id, event.type, Boolean(event.livemode), eventCreatedAt, JSON.stringify(event)],
     );
     if (!inserted.rowCount) { await client.query("rollback"); return "duplicate"; }
     await reconcileStripeEvent(client, event);
@@ -179,24 +193,39 @@ async function createExport(identity: Identity) {
   const exportId = `export_${randomUUID()}`;
   await pool.query("insert into data_export_requests(id,workspace_id,requested_by,status) values($1,$2,$3,'processing')", [exportId, identity.workspaceId, identity.principalId]);
   try {
-    const [workspace, repositories, sessions, productEvents, auditEvents] = await Promise.all([
+    const [workspace, repositories, sessions, productEvents, auditEvents, billing, entitlement] = await Promise.all([
       pool.query("select * from workspaces where id=$1", [identity.workspaceId]),
       pool.query("select * from hosted_repositories where workspace_id=$1", [identity.workspaceId]),
       pool.query("select * from sessions where workspace_id=$1", [identity.workspaceId]),
       pool.query("select * from product_events where workspace_id=$1 order by occurred_at", [identity.workspaceId]),
       pool.query("select * from audit_events where workspace_id=$1 order by occurred_at", [identity.workspaceId]),
+      pool.query("select * from billing_accounts where workspace_id=$1", [identity.workspaceId]),
+      pool.query("select * from workspace_entitlements where workspace_id=$1", [identity.workspaceId]),
     ]);
     const sessionIds = sessions.rows.map((row) => row.id);
-    const events = sessionIds.length
-      ? await pool.query("select * from session_events where session_id=any($1::text[]) order by occurred_at", [sessionIds])
-      : { rows: [] };
+    const billingIds = billing.rows.map((row) => row.id);
+    const [events, snapshots, verifications, rollbacks, subscriptions, usage] = await Promise.all([
+      sessionIds.length ? pool.query("select * from session_events where session_id=any($1::text[]) order by occurred_at", [sessionIds]) : Promise.resolve({ rows: [] }),
+      sessionIds.length ? pool.query("select * from snapshots where session_id=any($1::text[]) order by created_at", [sessionIds]) : Promise.resolve({ rows: [] }),
+      sessionIds.length ? pool.query("select * from verifications where session_id=any($1::text[]) order by finished_at", [sessionIds]) : Promise.resolve({ rows: [] }),
+      sessionIds.length ? pool.query("select * from rollback_requests where session_id=any($1::text[]) order by created_at", [sessionIds]) : Promise.resolve({ rows: [] }),
+      billingIds.length ? pool.query("select * from subscriptions where billing_account_id=any($1::text[]) order by created_at", [billingIds]) : Promise.resolve({ rows: [] }),
+      billingIds.length ? pool.query("select * from usage_events where billing_account_id=any($1::text[]) order by occurred_at", [billingIds]) : Promise.resolve({ rows: [] }),
+    ]);
     const payload = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       exportedAt: new Date().toISOString(),
       workspace: workspace.rows[0] ?? null,
       repositories: repositories.rows,
       sessions: sessions.rows,
       sessionEvents: events.rows,
+      snapshots: snapshots.rows,
+      verifications: verifications.rows,
+      rollbackRequests: rollbacks.rows,
+      billingAccounts: billing.rows,
+      subscriptions: subscriptions.rows,
+      entitlements: entitlement.rows,
+      usageEvents: usage.rows,
       productEvents: productEvents.rows,
       auditEvents: auditEvents.rows,
     };
@@ -247,7 +276,7 @@ const server = http.createServer(async (req, res) => {
       if (!stripeSecretKey) throw new HttpError(503, "Stripe secret key is not configured");
       const body = await jsonBody(req);
       const planKey = String(body.planKey ?? "developer");
-      if (!/^[a-z0-9_]+$/.test(planKey)) throw new HttpError(400, "invalid plan key");
+      if (!/^(developer|team|business|enterprise)$/.test(planKey)) throw new HttpError(400, "invalid paid plan key");
       const priceId = process.env[`STRIPE_PRICE_${planKey.toUpperCase()}`];
       if (!priceId) throw new HttpError(400, `Stripe price is not configured for ${planKey}`);
       const account = await billingAccount(pool, identity.workspaceId);
