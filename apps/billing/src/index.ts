@@ -1,6 +1,6 @@
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { checkoutParams, stripeRequest, verifyStripeSignature, type StripeEvent } from "./stripe.js";
 
 const port = Number(process.env.BILLING_PORT ?? 4100);
@@ -11,9 +11,12 @@ const publicOrigin = process.env.SESSIONS_PUBLIC_ORIGIN ?? "http://localhost:300
 const maxBody = Number(process.env.SESSIONS_MAX_BODY_BYTES ?? 1_048_576);
 const pool = new Pool({ connectionString: databaseUrl, max: Number(process.env.SESSIONS_DB_POOL_MAX ?? 10) });
 
-class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
+class HttpError extends Error {
+  constructor(public readonly status: number, message: string) { super(message); }
+}
 
 type Identity = { workspaceId: string; principalId: string; scopes: string[] };
+type Db = Pool | PoolClient;
 
 function send(res: http.ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...extra });
@@ -21,158 +24,283 @@ function send(res: http.ServerResponse, status: number, body: unknown, extra: Re
 }
 
 async function rawBody(req: http.IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = []; let size = 0;
-  for await (const chunk of req) { const b = Buffer.from(chunk); size += b.length; if (size > maxBody) throw new HttpError(413, "request body too large"); chunks.push(b); }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maxBody) throw new HttpError(413, "request body too large");
+    chunks.push(buffer);
+  }
   return Buffer.concat(chunks);
 }
 
 async function jsonBody(req: http.IncomingMessage): Promise<any> {
-  const raw = await rawBody(req); if (!raw.length) return {};
-  try { return JSON.parse(raw.toString("utf8")); } catch { throw new HttpError(400, "invalid JSON body"); }
+  const raw = await rawBody(req);
+  if (!raw.length) return {};
+  try { return JSON.parse(raw.toString("utf8")); }
+  catch { throw new HttpError(400, "invalid JSON body"); }
 }
 
 function tokenHash(token: string) { return createHash("sha256").update(token).digest("hex"); }
 function hasScope(identity: Identity, scope: string) { return identity.scopes.includes("*") || identity.scopes.includes(scope); }
+function requireScope(identity: Identity, scope: string) { if (!hasScope(identity, scope)) throw new HttpError(403, `missing scope: ${scope}`); }
 
 async function authenticate(req: http.IncomingMessage): Promise<Identity> {
   const auth = req.headers.authorization;
   if (!auth?.startsWith("Bearer ")) throw new HttpError(401, "bearer token required");
   const result = await pool.query(
-    `select c.workspace_id, c.principal_id, c.scopes from api_credentials c join principals p on p.id=c.principal_id
-     where c.token_hash=$1 and c.status='active' and p.status='active' and (c.expires_at is null or c.expires_at>now())`,
+    `select c.workspace_id, c.principal_id, c.scopes
+       from api_credentials c
+       join principals p on p.id = c.principal_id
+      where c.token_hash = $1
+        and c.status = 'active'
+        and p.status = 'active'
+        and (c.expires_at is null or c.expires_at > now())`,
     [tokenHash(auth.slice(7).trim())],
   );
   if (!result.rowCount) throw new HttpError(401, "invalid or expired credential");
   return { workspaceId: result.rows[0].workspace_id, principalId: result.rows[0].principal_id, scopes: result.rows[0].scopes ?? [] };
 }
 
-async function billingAccount(workspaceId: string) {
-  const r = await pool.query("select * from billing_accounts where workspace_id=$1", [workspaceId]);
-  if (!r.rowCount) throw new HttpError(404, "billing account not found");
-  return r.rows[0];
+async function billingAccount(db: Db, workspaceId: string) {
+  const result = await db.query("select * from billing_accounts where workspace_id=$1", [workspaceId]);
+  if (!result.rowCount) throw new HttpError(404, "billing account not found");
+  return result.rows[0];
 }
 
-async function setEntitlement(workspaceId: string, planKey: string, status: string, reason: string | null) {
-  await pool.query(
+async function setEntitlement(db: Db, workspaceId: string, planKey: string, status: string, reason: string | null) {
+  await db.query(
     `insert into workspace_entitlements(workspace_id,plan_key,status,source,reason,effective_at,updated_at)
      values($1,$2,$3,'stripe',$4,now(),now())
-     on conflict(workspace_id) do update set plan_key=excluded.plan_key,status=excluded.status,source='stripe',reason=excluded.reason,effective_at=now(),updated_at=now()`,
+     on conflict(workspace_id) do update
+       set plan_key=excluded.plan_key,status=excluded.status,source='stripe',reason=excluded.reason,effective_at=now(),updated_at=now()`,
     [workspaceId, planKey, status, reason],
   );
 }
 
-async function reconcileSubscription(object: any, eventType: string) {
-  const externalSubscription = typeof object.subscription === "string" ? object.subscription : object.id?.startsWith?.("sub_") ? object.id : object.subscription?.id;
-  const externalCustomer = typeof object.customer === "string" ? object.customer : object.customer?.id;
+async function resolveWorkspace(db: Db, object: any) {
+  const subscriptionId = typeof object.subscription === "string" ? object.subscription : object.id?.startsWith?.("sub_") ? object.id : object.subscription?.id;
+  const customerId = typeof object.customer === "string" ? object.customer : object.customer?.id;
   const metadata = object.metadata ?? object.subscription_details?.metadata ?? {};
-  let workspaceId = metadata.workspace_id ?? null;
-  let planKey = metadata.plan_key ?? null;
-  if (!workspaceId && externalSubscription) {
-    const r = await pool.query(`select b.workspace_id,s.plan_key from subscriptions s join billing_accounts b on b.id=s.billing_account_id where s.external_subscription_ref=$1 limit 1`, [externalSubscription]);
-    if (r.rowCount) { workspaceId = r.rows[0].workspace_id; planKey ??= r.rows[0].plan_key; }
+  let workspaceId: string | null = metadata.workspace_id ?? null;
+  let planKey: string | null = metadata.plan_key ?? null;
+
+  if (!workspaceId && subscriptionId) {
+    const found = await db.query(
+      `select b.workspace_id,s.plan_key from subscriptions s
+       join billing_accounts b on b.id=s.billing_account_id
+       where s.external_subscription_ref=$1 limit 1`,
+      [subscriptionId],
+    );
+    if (found.rowCount) { workspaceId = found.rows[0].workspace_id; planKey ??= found.rows[0].plan_key; }
   }
-  if (!workspaceId && externalCustomer) {
-    const r = await pool.query("select workspace_id,plan_key from billing_accounts where external_customer_ref=$1 limit 1", [externalCustomer]);
-    if (r.rowCount) { workspaceId = r.rows[0].workspace_id; planKey ??= r.rows[0].plan_key; }
+  if (!workspaceId && customerId) {
+    const found = await db.query("select workspace_id,plan_key from billing_accounts where external_customer_ref=$1 limit 1", [customerId]);
+    if (found.rowCount) { workspaceId = found.rows[0].workspace_id; planKey ??= found.rows[0].plan_key; }
   }
+  return { workspaceId, planKey: planKey ?? "developer", subscriptionId, customerId };
+}
+
+async function upsertSubscription(db: Db, accountId: string, planKey: string, subscriptionId: string, object: any, eventType: string) {
+  const status = object.status ?? (eventType === "customer.subscription.deleted" ? "canceled" : "active");
+  const periodStart = object.current_period_start ? new Date(object.current_period_start * 1000) : null;
+  const periodEnd = object.current_period_end ? new Date(object.current_period_end * 1000) : null;
+  const canceledAt = object.canceled_at ? new Date(object.canceled_at * 1000) : null;
+  await db.query(
+    `insert into subscriptions(id,billing_account_id,plan_key,status,seats,external_subscription_ref,period_start,period_end,cancel_at_period_end,canceled_at)
+     values($1,$2,$3,$4,1,$5,$6,$7,$8,$9)
+     on conflict(id) do update
+       set plan_key=excluded.plan_key,status=excluded.status,external_subscription_ref=excluded.external_subscription_ref,
+           period_start=coalesce(excluded.period_start,subscriptions.period_start),period_end=coalesce(excluded.period_end,subscriptions.period_end),
+           cancel_at_period_end=excluded.cancel_at_period_end,canceled_at=coalesce(excluded.canceled_at,subscriptions.canceled_at),updated_at=now()`,
+    [`stripe_${subscriptionId}`, accountId, planKey, status, subscriptionId, periodStart, periodEnd, Boolean(object.cancel_at_period_end), canceledAt],
+  );
+}
+
+async function reconcileStripeEvent(db: Db, event: StripeEvent) {
+  const object = event.data.object;
+  const { workspaceId, planKey, subscriptionId, customerId } = await resolveWorkspace(db, object);
   if (!workspaceId) return;
-  planKey ??= "developer";
-  const account = await billingAccount(workspaceId);
-  if (externalCustomer) await pool.query("update billing_accounts set external_provider='stripe',external_customer_ref=$2,updated_at=now() where id=$1", [account.id, externalCustomer]);
-  if (externalSubscription) {
-    const status = object.status ?? (eventType === "customer.subscription.deleted" ? "canceled" : eventType === "invoice.payment_failed" ? "past_due" : "active");
-    await pool.query(
-      `insert into subscriptions(id,billing_account_id,plan_key,status,seats,external_subscription_ref,period_start,period_end,cancel_at_period_end,canceled_at)
-       values($1,$2,$3,$4,1,$5,to_timestamp($6),to_timestamp($7),$8,$9)
-       on conflict(id) do update set plan_key=excluded.plan_key,status=excluded.status,external_subscription_ref=excluded.external_subscription_ref,period_start=excluded.period_start,period_end=excluded.period_end,cancel_at_period_end=excluded.cancel_at_period_end,canceled_at=excluded.canceled_at,updated_at=now()`,
-      [`stripe_${externalSubscription}`, account.id, planKey, status, externalSubscription, object.current_period_start ?? 0, object.current_period_end ?? 0, Boolean(object.cancel_at_period_end), object.canceled_at ? new Date(object.canceled_at * 1000) : null],
+  const account = await billingAccount(db, workspaceId);
+
+  if (customerId) {
+    await db.query(
+      "update billing_accounts set external_provider='stripe',external_customer_ref=$2,updated_at=now() where id=$1",
+      [account.id, customerId],
     );
   }
-  if (eventType === "invoice.payment_failed") {
-    await pool.query("update billing_accounts set payment_state='failed',status='past_due',updated_at=now() where id=$1", [account.id]);
-    await setEntitlement(workspaceId, planKey, "payment_failed", "invoice.payment_failed");
-  } else if (eventType === "customer.subscription.deleted") {
-    await pool.query("update billing_accounts set status='canceled',updated_at=now() where id=$1", [account.id]);
-    await setEntitlement(workspaceId, planKey, "canceled", "customer.subscription.deleted");
-  } else if (["invoice.paid", "checkout.session.completed", "customer.subscription.updated", "customer.subscription.created"].includes(eventType)) {
+
+  if (subscriptionId && (object.id?.startsWith?.("sub_") || event.type === "checkout.session.completed")) {
+    await upsertSubscription(db, account.id, planKey, subscriptionId, object, event.type);
+  }
+
+  if (event.type === "invoice.payment_failed") {
+    await db.query("update billing_accounts set payment_state='failed',status='past_due',updated_at=now() where id=$1", [account.id]);
+    await setEntitlement(db, workspaceId, planKey, "payment_failed", event.type);
+    return;
+  }
+
+  if (event.type === "customer.subscription.deleted") {
+    await db.query("update billing_accounts set status='canceled',updated_at=now() where id=$1", [account.id]);
+    await setEntitlement(db, workspaceId, planKey, "canceled", event.type);
+    return;
+  }
+
+  if (["invoice.paid", "checkout.session.completed", "customer.subscription.created", "customer.subscription.updated"].includes(event.type)) {
     const sourceStatus = object.status ?? "active";
-    const entitlementStatus = ["active", "trialing", "complete", "paid"].includes(sourceStatus) ? "active" : sourceStatus === "past_due" ? "payment_failed" : "suspended";
-    await pool.query("update billing_accounts set plan_key=$2,payment_state=$3,status=$4,updated_at=now() where id=$1", [account.id, planKey, entitlementStatus === "active" ? "ok" : "failed", sourceStatus]);
-    await setEntitlement(workspaceId, planKey, entitlementStatus, eventType);
+    const entitlementStatus = ["active", "trialing", "complete", "paid"].includes(sourceStatus)
+      ? "active"
+      : sourceStatus === "past_due" ? "payment_failed" : "suspended";
+    await db.query(
+      "update billing_accounts set plan_key=$2,payment_state=$3,status=$4,updated_at=now() where id=$1",
+      [account.id, planKey, entitlementStatus === "active" ? "ok" : "failed", sourceStatus],
+    );
+    await setEntitlement(db, workspaceId, planKey, entitlementStatus, event.type);
   }
 }
 
 async function handleStripeEvent(event: StripeEvent): Promise<"processed" | "duplicate"> {
-  const inserted = await pool.query("insert into stripe_events(id,event_type,livemode,payload) values($1,$2,$3,$4) on conflict(id) do nothing returning id", [event.id, event.type, Boolean(event.livemode), JSON.stringify(event)]);
-  if (!inserted.rowCount) return "duplicate";
-  if (["checkout.session.completed", "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "invoice.paid", "invoice.payment_failed"].includes(event.type)) {
-    await reconcileSubscription(event.data.object, event.type);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const inserted = await client.query(
+      "insert into stripe_events(id,event_type,livemode,payload) values($1,$2,$3,$4) on conflict(id) do nothing returning id",
+      [event.id, event.type, Boolean(event.livemode), JSON.stringify(event)],
+    );
+    if (!inserted.rowCount) { await client.query("rollback"); return "duplicate"; }
+    await reconcileStripeEvent(client, event);
+    await client.query("commit");
+    return "processed";
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally { client.release(); }
+}
+
+async function createExport(identity: Identity) {
+  const exportId = `export_${randomUUID()}`;
+  await pool.query(
+    "insert into data_export_requests(id,workspace_id,requested_by,status) values($1,$2,$3,'processing')",
+    [exportId, identity.workspaceId, identity.principalId],
+  );
+  try {
+    const [workspace, repositories, sessions, productEvents, auditEvents] = await Promise.all([
+      pool.query("select * from workspaces where id=$1", [identity.workspaceId]),
+      pool.query("select * from hosted_repositories where workspace_id=$1", [identity.workspaceId]),
+      pool.query("select * from sessions where workspace_id=$1", [identity.workspaceId]),
+      pool.query("select * from product_events where workspace_id=$1 order by occurred_at", [identity.workspaceId]),
+      pool.query("select * from audit_events where workspace_id=$1 order by occurred_at", [identity.workspaceId]),
+    ]);
+    const sessionIds = sessions.rows.map((row) => row.id);
+    const events = sessionIds.length
+      ? await pool.query("select * from session_events where session_id=any($1::text[]) order by occurred_at", [sessionIds])
+      : { rows: [] };
+    const payload = {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      workspace: workspace.rows[0] ?? null,
+      repositories: repositories.rows,
+      sessions: sessions.rows,
+      sessionEvents: events.rows,
+      productEvents: productEvents.rows,
+      auditEvents: auditEvents.rows,
+    };
+    await pool.query("update data_export_requests set status='ready',completed_at=now() where id=$1", [exportId]);
+    return { exportId, payload };
+  } catch (error) {
+    await pool.query("update data_export_requests set status='failed',completed_at=now() where id=$1", [exportId]);
+    throw error;
   }
-  return "processed";
 }
 
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-    if (req.method === "GET" && url.pathname === "/health") { await pool.query("select 1"); return send(res, 200, { ok: true, service: "sessions-billing" }); }
+    if (req.method === "GET" && url.pathname === "/health") {
+      await pool.query("select 1");
+      return send(res, 200, { ok: true, service: "sessions-billing" });
+    }
 
     if (req.method === "POST" && url.pathname === "/webhooks/stripe") {
       if (!stripeWebhookSecret) throw new HttpError(503, "Stripe webhook secret is not configured");
-      const raw = await rawBody(req); const signature = String(req.headers["stripe-signature"] ?? "");
-      let event: StripeEvent; try { event = verifyStripeSignature(raw, signature, stripeWebhookSecret); } catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "invalid webhook"); }
+      const raw = await rawBody(req);
+      const signature = String(req.headers["stripe-signature"] ?? "");
+      let event: StripeEvent;
+      try { event = verifyStripeSignature(raw, signature, stripeWebhookSecret); }
+      catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "invalid webhook"); }
       return send(res, 200, { received: true, result: await handleStripeEvent(event) });
     }
 
     const identity = await authenticate(req);
+
     if (req.method === "GET" && url.pathname === "/api/billing/subscription") {
-      if (!hasScope(identity, "billing:read")) throw new HttpError(403, "missing scope: billing:read");
-      const r = await pool.query(`select b.*,e.status as entitlement_status,e.reason as entitlement_reason,s.status as subscription_status,s.external_subscription_ref,s.cancel_at_period_end,s.period_end from billing_accounts b left join workspace_entitlements e on e.workspace_id=b.workspace_id left join lateral (select * from subscriptions where billing_account_id=b.id order by updated_at desc limit 1) s on true where b.workspace_id=$1`, [identity.workspaceId]);
-      return send(res, 200, r.rows[0] ?? null);
+      requireScope(identity, "billing:read");
+      const result = await pool.query(
+        `select b.*,e.status as entitlement_status,e.reason as entitlement_reason,
+                s.status as subscription_status,s.external_subscription_ref,s.cancel_at_period_end,s.period_end
+           from billing_accounts b
+           left join workspace_entitlements e on e.workspace_id=b.workspace_id
+           left join lateral (select * from subscriptions where billing_account_id=b.id order by updated_at desc limit 1) s on true
+          where b.workspace_id=$1`,
+        [identity.workspaceId],
+      );
+      return send(res, 200, result.rows[0] ?? null);
     }
 
     if (req.method === "POST" && url.pathname === "/api/billing/checkout") {
-      if (!hasScope(identity, "billing:write")) throw new HttpError(403, "missing scope: billing:write");
+      requireScope(identity, "billing:write");
       if (!stripeSecretKey) throw new HttpError(503, "Stripe secret key is not configured");
-      const body = await jsonBody(req); const planKey = String(body.planKey ?? "developer");
+      const body = await jsonBody(req);
+      const planKey = String(body.planKey ?? "developer");
       if (!/^[a-z0-9_]+$/.test(planKey)) throw new HttpError(400, "invalid plan key");
-      const priceId = process.env[`STRIPE_PRICE_${planKey.toUpperCase()}`]; if (!priceId) throw new HttpError(400, `Stripe price is not configured for ${planKey}`);
-      const account = await billingAccount(identity.workspaceId);
-      const params = checkoutParams({ priceId, workspaceId: identity.workspaceId, planKey, customerId: account.external_customer_ref, successUrl: `${publicOrigin}/billing/success?session_id={CHECKOUT_SESSION_ID}`, cancelUrl: `${publicOrigin}/billing/cancelled` });
+      const priceId = process.env[`STRIPE_PRICE_${planKey.toUpperCase()}`];
+      if (!priceId) throw new HttpError(400, `Stripe price is not configured for ${planKey}`);
+      const account = await billingAccount(pool, identity.workspaceId);
+      const params = checkoutParams({
+        priceId,
+        workspaceId: identity.workspaceId,
+        planKey,
+        customerId: account.external_customer_ref,
+        successUrl: `${publicOrigin}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${publicOrigin}/billing/cancelled`,
+      });
       const checkout = await stripeRequest(stripeSecretKey, "checkout/sessions", params);
-      await pool.query("insert into billing_events(id,billing_account_id,event_type,payload) values($1,$2,'checkout.created',$3)", [`billing_${randomUUID()}`, account.id, JSON.stringify({ checkoutSessionId: checkout.id, planKey })]);
+      await pool.query(
+        "insert into billing_events(id,billing_account_id,event_type,external_event_ref,idempotency_key,payload) values($1,$2,'checkout.created',$3,$3,$4) on conflict(idempotency_key) do nothing",
+        [`billing_${randomUUID()}`, account.id, checkout.id, JSON.stringify({ checkoutSessionId: checkout.id, planKey })],
+      );
       return send(res, 201, { id: checkout.id, url: checkout.url });
     }
 
     if (req.method === "POST" && url.pathname === "/api/account/export") {
-      if (!hasScope(identity, "account:export")) throw new HttpError(403, "missing scope: account:export");
-      const exportId = `export_${randomUUID()}`;
-      await pool.query("insert into data_export_requests(id,workspace_id,status,requested_by,created_at) values($1,$2,'processing',$3,now())", [exportId, identity.workspaceId, identity.principalId]);
-      const [workspace, repositories, sessions, productEvents, auditEvents] = await Promise.all([
-        pool.query("select * from workspaces where id=$1", [identity.workspaceId]),
-        pool.query("select * from hosted_repositories where workspace_id=$1", [identity.workspaceId]),
-        pool.query("select * from sessions where workspace_id=$1", [identity.workspaceId]),
-        pool.query("select * from product_events where workspace_id=$1 order by occurred_at", [identity.workspaceId]),
-        pool.query("select * from audit_events where workspace_id=$1 order by occurred_at", [identity.workspaceId]),
-      ]);
-      const sessionIds = sessions.rows.map((row) => row.id);
-      const events = sessionIds.length ? await pool.query("select * from session_events where session_id = any($1::text[]) order by occurred_at", [sessionIds]) : { rows: [] };
-      const payload = { exportedAt: new Date().toISOString(), workspace: workspace.rows[0] ?? null, repositories: repositories.rows, sessions: sessions.rows, sessionEvents: events.rows, productEvents: productEvents.rows, auditEvents: auditEvents.rows };
-      await pool.query("update data_export_requests set status='completed',completed_at=now() where id=$1", [exportId]);
+      requireScope(identity, "account:export");
+      const { exportId, payload } = await createExport(identity);
       return send(res, 200, payload, { "content-disposition": `attachment; filename="sessions-${identity.workspaceId}-${exportId}.json"` });
     }
 
     if (req.method === "POST" && url.pathname === "/api/account/cancel") {
-      if (!hasScope(identity, "billing:write")) throw new HttpError(403, "missing scope: billing:write");
+      requireScope(identity, "billing:write");
       if (!stripeSecretKey) throw new HttpError(503, "Stripe secret key is not configured");
-      const account = await billingAccount(identity.workspaceId);
-      const subscription = await pool.query("select * from subscriptions where billing_account_id=$1 and external_subscription_ref is not null order by updated_at desc limit 1", [account.id]);
+      const account = await billingAccount(pool, identity.workspaceId);
+      const subscription = await pool.query(
+        "select * from subscriptions where billing_account_id=$1 and external_subscription_ref is not null order by updated_at desc limit 1",
+        [account.id],
+      );
       if (!subscription.rowCount) throw new HttpError(409, "no Stripe subscription is attached to this workspace");
-      const externalId = subscription.rows[0].external_subscription_ref;
-      await stripeRequest(stripeSecretKey, `subscriptions/${encodeURIComponent(externalId)}`, new URLSearchParams({ cancel_at_period_end: "true" }));
+      const row = subscription.rows[0];
+      await stripeRequest(
+        stripeSecretKey,
+        `subscriptions/${encodeURIComponent(row.external_subscription_ref)}`,
+        new URLSearchParams({ cancel_at_period_end: "true" }),
+      );
       const cancellationId = `cancel_${randomUUID()}`;
-      await pool.query("insert into cancellation_records(id,workspace_id,billing_account_id,status,reason,created_at) values($1,$2,$3,'requested',$4,now())", [cancellationId, identity.workspaceId, account.id, "customer_requested"]);
-      await pool.query("update subscriptions set cancel_at_period_end=true,updated_at=now() where id=$1", [subscription.rows[0].id]);
-      return send(res, 202, { cancellationId, status: "requested", cancelAtPeriodEnd: true });
+      await pool.query(
+        "insert into cancellation_records(id,billing_account_id,requested_by,reason,effective_at,export_requested) values($1,$2,$3,$4,$5,false)",
+        [cancellationId, account.id, identity.principalId, "customer_requested", row.period_end ?? new Date()],
+      );
+      await pool.query("update subscriptions set cancel_at_period_end=true,updated_at=now() where id=$1", [row.id]);
+      return send(res, 202, { cancellationId, status: "requested", cancelAtPeriodEnd: true, effectiveAt: row.period_end ?? null });
     }
 
     throw new HttpError(404, "not found");
@@ -184,5 +312,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, "0.0.0.0", () => console.log(JSON.stringify({ level: "info", service: "sessions-billing", event: "server.started", port })));
-async function shutdown() { server.close(async () => { await pool.end(); process.exit(0); }); setTimeout(() => process.exit(1), 10_000).unref(); }
-process.on("SIGTERM", () => void shutdown()); process.on("SIGINT", () => void shutdown());
+
+async function shutdown() {
+  server.close(async () => { await pool.end(); process.exit(0); });
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+process.on("SIGTERM", () => void shutdown());
+process.on("SIGINT", () => void shutdown());
