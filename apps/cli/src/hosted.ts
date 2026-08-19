@@ -39,13 +39,22 @@ export async function handleHostedCommand(command: string, args: string[]): Prom
     const token = args[1] || process.env.SESSIONS_API_TOKEN;
     if (!apiUrl || !/^https?:\/\//.test(apiUrl)) throw new Error("Usage: sessions connect <https://host> [token]");
     if (!token) throw new Error("Provide a workspace token as the second argument or SESSIONS_API_TOKEN");
+    const previousUrl = process.env.SESSIONS_API_URL;
+    const previousToken = process.env.SESSIONS_API_TOKEN;
+    process.env.SESSIONS_API_URL = apiUrl;
+    process.env.SESSIONS_API_TOKEN = token;
+    try {
+      await request("/api/sessions");
+    } catch (error) {
+      if (previousUrl) process.env.SESSIONS_API_URL = previousUrl; else delete process.env.SESSIONS_API_URL;
+      if (previousToken) process.env.SESSIONS_API_TOKEN = previousToken; else delete process.env.SESSIONS_API_TOKEN;
+      throw new Error(`Hosted credential verification failed: ${error instanceof Error ? error.message : error}`);
+    }
     const path = configPath();
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await writeFile(path, `${JSON.stringify({ apiUrl, token }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     if (process.platform !== "win32") await chmod(path, 0o600);
-    process.env.SESSIONS_API_URL = apiUrl; process.env.SESSIONS_API_TOKEN = token;
-    const ready = await request("/ready");
-    console.log(`Connected to ${apiUrl}${(ready as any)?.database ? ` (${(ready as any).database})` : ""}`);
+    console.log(`Connected to ${apiUrl}; workspace token verified.`);
     return true;
   }
   if (command === "disconnect") {
