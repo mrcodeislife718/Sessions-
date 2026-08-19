@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { PullRequestDiff } from "./PullRequestDiff";
 
 type Review={id:string;state:string;body:string;submitted_at:string};
 type Comment={id:string;body:string;path?:string|null;line?:number|null;created_at:string};
@@ -52,6 +53,8 @@ export function PullRequestClient({id,number}:{id:string;number:number}){
       <section className="workspace-panel" style={{padding:22,marginBottom:16}}><div style={{color:"var(--muted)",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{pull.body||"No description provided."}</div><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginTop:20}}><Metric label="Head commit" value={pull.head_commit_id?.slice(0,14)??"none"}/><Metric label="Verification" value={pull.verification_state}/><Metric label="Approvals" value={`${approvals}/${pull.required_approvals}`}/><Metric label="Mergeability" value={canMerge?"ready":pull.state==="merged"?"merged":"blocked"}/></div></section>
 
       <section className="workspace-panel" style={{marginBottom:16}}><div className="panel-head"><div><h2>Native verification</h2><p>Sessions verifies source integrity, repository consistency, and recovery readiness.</p></div></div><div>{pull.checks.length?pull.checks.map(check=><div className="session-row" key={check.id} style={{gridTemplateColumns:"34px 1fr auto"}}><span className="session-icon">{check.conclusion==="success"?"✓":check.conclusion==="failure"?"×":"·"}</span><div className="session-primary"><strong>{check.name}</strong><span>{check.summary||`${check.category} · ${check.status}`}</span></div><span className={`status-pill ${check.conclusion==="success"?"status-good":"status-warn"}`}>{check.conclusion??check.status}</span></div>):<div className="sessions-empty">Verification checks are being prepared.</div>}</div></section>
+
+      <PullRequestDiff repositoryId={id} baseBranch={pull.base_branch} headBranch={pull.head_branch} headCommitId={pull.head_commit_id}/>
 
       <section className="workspace-panel" style={{padding:22,marginBottom:16}}><h2 style={{fontSize:15,marginTop:0}}>Review</h2><textarea rows={4} value={reviewBody} onChange={e=>setReviewBody(e.target.value)} placeholder="Leave review notes…" style={fieldStyle}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:12,flexWrap:"wrap"}}><button className="button button-secondary" onClick={()=>review("commented")} disabled={!!working}>Comment</button><button className="button button-danger" onClick={()=>review("changes_requested")} disabled={!!working}>Request changes</button><button className="button button-primary" onClick={()=>review("approved")} disabled={!!working}>Approve</button></div>{pull.reviews.length?<div style={{marginTop:18,display:"grid",gap:8}}>{pull.reviews.map(review=><div className="signal-row" key={review.id}><span>{review.body||"No review note"}</span><strong>{review.state}</strong></div>)}</div>:null}</section>
 
