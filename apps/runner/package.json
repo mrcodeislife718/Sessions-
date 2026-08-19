@@ -8,7 +8,7 @@
     "build": "tsc -p .",
     "start": "node dist/index.js",
     "typecheck": "tsc -p . --noEmit",
-    "test": "tsx --test src/worker.test.ts"
+    "test": "tsx --test src/worker.test.ts src/actions.test.ts"
   },
   "dependencies": {
     "pg": "^8.13.1"
