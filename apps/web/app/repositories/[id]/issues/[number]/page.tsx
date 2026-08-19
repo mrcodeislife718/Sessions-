@@ -1,0 +1,1 @@
+import {IssueClient} from "./IssueClient";export default async function IssuePage({params}:{params:Promise<{id:string;number:string}>}){const{id,number}=await params;return <IssueClient id={id} number={Number(number)}/>;}
