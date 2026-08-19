@@ -13,6 +13,7 @@ migrations=(
   "$root/infrastructure/postgres/004-production-controls.sql"
   "$root/infrastructure/postgres/005-commercial-operations.sql"
   "$root/infrastructure/postgres/006-product-analytics.sql"
+  "$root/infrastructure/postgres/007-billing-integrations.sql"
 )
 
 for migration in "${migrations[@]}"; do "${psql_cmd[@]}" -f "$migration"; done
@@ -24,12 +25,14 @@ insert into workspaces (id, organization_id, name) values ('workspace_qualificat
 insert into principals (id, kind, display_name) values ('principal_qualification', 'human', 'Qualification User') on conflict (id) do nothing;
 insert into workspace_memberships (workspace_id, principal_id, role) values ('workspace_qualification', 'principal_qualification', 'owner') on conflict do nothing;
 insert into hosted_repositories (id, workspace_id, name) values ('repo_qualification', 'workspace_qualification', 'qualification-repo') on conflict (id) do nothing;
+insert into workspace_entitlements (workspace_id, plan_key, status, source) values ('workspace_qualification', 'developer', 'active', 'qualification') on conflict(workspace_id) do update set plan_key='developer',status='active',source='qualification',updated_at=now();
 insert into sessions (id, workspace_id, project_id, repository_id, objective) values ('session_qualification', 'workspace_qualification', 'project_qualification', 'repo_qualification', 'prove persistence') on conflict (id) do nothing;
 insert into session_events (id, session_id, type, occurred_at, actor, payload) values ('event_qualification', 'session_qualification', 'SessionStarted', now(), '{"id":"principal_qualification","kind":"human","displayName":"Qualification User"}', '{"objective":"prove persistence"}') on conflict (id) do nothing;
 insert into snapshots (id, session_id, repository_id, digest, manifest, created_at) values ('snapshot_qualification', 'session_qualification', 'repo_qualification', 'sha256:qualification', '{"entries":[]}', now()) on conflict (id) do nothing;
 insert into verifications (id, session_id, snapshot_id, kind, status, summary, requested_by, started_at, finished_at) values ('verification_qualification', 'session_qualification', 'snapshot_qualification', 'qualification', 'passed', 'database persistence verified', '{"id":"principal_qualification","kind":"human","displayName":"Qualification User"}', now(), now()) on conflict (id) do nothing;
-insert into billing_accounts (id, workspace_id, plan_key, status) values ('billing_qualification', 'workspace_qualification', 'developer', 'active') on conflict (id) do nothing;
-insert into subscriptions (id, billing_account_id, plan_key, status, seats) values ('subscription_qualification', 'billing_qualification', 'developer', 'active', 1) on conflict (id) do nothing;
+insert into billing_accounts (id, workspace_id, plan_key, status, external_provider, payment_state) values ('billing_qualification', 'workspace_qualification', 'developer', 'active', 'stripe', 'ok') on conflict (id) do nothing;
+insert into subscriptions (id, billing_account_id, plan_key, status, seats, external_subscription_ref) values ('subscription_qualification', 'billing_qualification', 'developer', 'active', 1, 'sub_qualification') on conflict (id) do nothing;
+insert into stripe_events (id,event_type,livemode,payload) values ('evt_qualification','invoice.paid',false,'{"id":"evt_qualification","type":"invoice.paid"}') on conflict(id) do nothing;
 insert into usage_events (id, billing_account_id, workspace_id, repository_id, session_id, dimension, quantity, unit, idempotency_key) values ('usage_qualification', 'billing_qualification', 'workspace_qualification', 'repo_qualification', 'session_qualification', 'runner_seconds', 1, 'second', 'qualification-usage') on conflict (id) do nothing;
 insert into audit_events (id, workspace_id, principal_id, request_id, action, resource_type, resource_id, outcome) values ('audit_qualification', 'workspace_qualification', 'principal_qualification', 'request_qualification', 'session.create', 'session', 'session_qualification', 'allowed') on conflict (id) do nothing;
 insert into product_events (id, workspace_id, principal_id, event_name, session_id, repository_id, properties) values ('product_qualification', 'workspace_qualification', 'principal_qualification', 'recovery_completed', 'session_qualification', 'repo_qualification', '{"source":"qualification"}') on conflict (id) do nothing;
@@ -45,6 +48,8 @@ BEGIN
   IF (select count(*) from product_events where workspace_id='workspace_qualification') <> 1 THEN RAISE EXCEPTION 'product telemetry assertion failed'; END IF;
   IF (select count(*) from recovery_experiments where continuation_ready is true) <> 1 THEN RAISE EXCEPTION 'recovery proof assertion failed'; END IF;
   IF (select count(*) from recovery_proof_summary) <> 1 THEN RAISE EXCEPTION 'recovery analytics view assertion failed'; END IF;
+  IF (select count(*) from stripe_events where id='evt_qualification') <> 1 THEN RAISE EXCEPTION 'Stripe event ledger assertion failed'; END IF;
+  IF (select status from workspace_entitlements where workspace_id='workspace_qualification') <> 'active' THEN RAISE EXCEPTION 'entitlement assertion failed'; END IF;
 END $$;
 SQL
 
@@ -92,5 +97,7 @@ psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select status from verifications wh
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select outcome from audit_events where id='audit_qualification'" | grep -qx 'allowed'
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select continuation_ready from recovery_experiments where id='recovery_qualification'" | grep -qx 't'
 psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select experiments from recovery_proof_summary" | grep -qx '1'
+psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select event_type from stripe_events where id='evt_qualification'" | grep -qx 'invoice.paid'
+psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select status from workspace_entitlements where workspace_id='workspace_qualification'" | grep -qx 'active'
 
-echo 'PostgreSQL qualification passed: migrations, analytics, idempotent reapply, persistence, commercial telemetry, backup, and independent restore.'
+echo 'PostgreSQL qualification passed: migrations through billing integrations, analytics, idempotent reapply, persistence, commercial telemetry, Stripe ledger, entitlements, backup, and independent restore.'
