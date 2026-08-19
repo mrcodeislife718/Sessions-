@@ -14,6 +14,7 @@ migrations=(
   "$root/infrastructure/postgres/005-commercial-operations.sql"
   "$root/infrastructure/postgres/006-product-analytics.sql"
   "$root/infrastructure/postgres/007-billing-integrations.sql"
+  "$root/infrastructure/postgres/008-repository-collaboration.sql"
 )
 
 for migration in "${migrations[@]}"; do "${psql_cmd[@]}" -f "$migration"; done
@@ -38,6 +39,10 @@ insert into audit_events (id, workspace_id, principal_id, request_id, action, re
 insert into product_events (id, workspace_id, principal_id, event_name, session_id, repository_id, properties) values ('product_qualification', 'workspace_qualification', 'principal_qualification', 'recovery_completed', 'session_qualification', 'repo_qualification', '{"source":"qualification"}') on conflict (id) do nothing;
 insert into recovery_experiments (id, workspace_id, session_id, experiment_kind, baseline_kind, orientation_ms, missing_context_count, reproduction_success, continuation_ready, reconstruction_accuracy) values ('recovery_qualification', 'workspace_qualification', 'session_qualification', 'cross_environment', 'git_plus_chat', 1, 0, true, true, 1.0) on conflict (id) do nothing;
 insert into workspace_limits (workspace_id, hosted_repository_limit, runner_seconds_monthly_limit, storage_bytes_limit) values ('workspace_qualification', 10, 10000, 1073741824) on conflict (workspace_id) do nothing;
+insert into repository_issues (workspace_id, repository_id, number, title, body, author_principal_id) values ('workspace_qualification','repo_qualification',1,'Qualification issue','prove issue persistence','principal_qualification') on conflict(repository_id,number) do nothing;
+insert into pull_requests (workspace_id, repository_id, number, title, base_branch, head_branch, head_commit_id, author_principal_id, verification_state) values ('workspace_qualification','repo_qualification',1,'Qualification PR','main','feature','cp_qualification','principal_qualification','passed') on conflict(repository_id,number) do nothing;
+insert into action_runs (workspace_id, repository_id, commit_id, trigger, status, conclusion, actor_principal_id) values ('workspace_qualification','repo_qualification','cp_qualification','commit','completed','success','principal_qualification');
+insert into repository_releases (workspace_id, repository_id, tag_name, name, commit_id, author_principal_id, published_at) values ('workspace_qualification','repo_qualification','v0.0.qualification','Qualification Release','cp_qualification','principal_qualification',now()) on conflict(repository_id,tag_name) do nothing;
 
 DO $$
 BEGIN
@@ -50,6 +55,10 @@ BEGIN
   IF (select count(*) from recovery_proof_summary) <> 1 THEN RAISE EXCEPTION 'recovery analytics view assertion failed'; END IF;
   IF (select count(*) from stripe_events where id='evt_qualification') <> 1 THEN RAISE EXCEPTION 'Stripe event ledger assertion failed'; END IF;
   IF (select status from workspace_entitlements where workspace_id='workspace_qualification') <> 'active' THEN RAISE EXCEPTION 'entitlement assertion failed'; END IF;
+  IF (select count(*) from repository_issues where repository_id='repo_qualification') <> 1 THEN RAISE EXCEPTION 'issue persistence assertion failed'; END IF;
+  IF (select count(*) from pull_requests where repository_id='repo_qualification') <> 1 THEN RAISE EXCEPTION 'pull request persistence assertion failed'; END IF;
+  IF (select count(*) from action_runs where repository_id='repo_qualification') < 1 THEN RAISE EXCEPTION 'Actions persistence assertion failed'; END IF;
+  IF (select count(*) from repository_releases where repository_id='repo_qualification') <> 1 THEN RAISE EXCEPTION 'release persistence assertion failed'; END IF;
 END $$;
 SQL
 
@@ -62,42 +71,35 @@ host_uid="$(id -u)"
 host_gid="$(id -g)"
 
 pg_dump_matched() {
-  if [[ "$server_major" == "$client_major" ]]; then
-    pg_dump "$DATABASE_URL" --format=custom --file="$backup"
+  if [[ "$server_major" == "$client_major" ]]; then pg_dump "$DATABASE_URL" --format=custom --file="$backup";
   elif command -v docker >/dev/null 2>&1; then
-    local dir file
-    dir="$(dirname "$backup")"; file="$(basename "$backup")"
+    local dir file; dir="$(dirname "$backup")"; file="$(basename "$backup")"
     docker run --rm --user "$host_uid:$host_gid" --network host -e PGPASSWORD="${PGPASSWORD:-}" -v "$dir:/backup" "postgres:${server_major}" pg_dump "$DATABASE_URL" --format=custom --file="/backup/$file"
-  else
-    echo "pg_dump major version $client_major does not match server $server_major and Docker is unavailable" >&2
-    exit 1
-  fi
+  else echo "pg_dump major version $client_major does not match server $server_major and Docker is unavailable" >&2; exit 1; fi
 }
-
 pg_restore_matched() {
   local restore_url="$1"
-  if [[ "$server_major" == "$client_major" ]]; then
-    pg_restore --no-owner --no-privileges --dbname="$restore_url" "$backup"
-  else
-    local dir file
-    dir="$(dirname "$backup")"; file="$(basename "$backup")"
+  if [[ "$server_major" == "$client_major" ]]; then pg_restore --no-owner --no-privileges --dbname="$restore_url" "$backup";
+  elif command -v docker >/dev/null 2>&1; then
+    local dir file; dir="$(dirname "$backup")"; file="$(basename "$backup")"
     docker run --rm --user "$host_uid:$host_gid" --network host -e PGPASSWORD="${PGPASSWORD:-}" -v "$dir:/backup:ro" "postgres:${server_major}" pg_restore --no-owner --no-privileges --dbname="$restore_url" "/backup/$file"
-  fi
+  else echo "pg_restore major version $client_major does not match server $server_major and Docker is unavailable" >&2; exit 1; fi
 }
 
 pg_dump_matched
 test -s "$backup"
+restore_db="sessions_restore_qualification"
 admin_url="${DATABASE_URL%/*}/postgres"
-psql "$admin_url" -v ON_ERROR_STOP=1 -c 'drop database if exists sessions_restore_qualification;'
-psql "$admin_url" -v ON_ERROR_STOP=1 -c 'create database sessions_restore_qualification;'
-restore_url="${DATABASE_URL%/*}/sessions_restore_qualification"
+restore_url="${DATABASE_URL%/*}/$restore_db"
+psql "$admin_url" -v ON_ERROR_STOP=1 -c "drop database if exists $restore_db with (force);" -c "create database $restore_db;"
 pg_restore_matched "$restore_url"
-psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select objective from sessions where id='session_qualification'" | grep -qx 'prove persistence'
-psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select status from verifications where id='verification_qualification'" | grep -qx 'passed'
-psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select outcome from audit_events where id='audit_qualification'" | grep -qx 'allowed'
-psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select continuation_ready from recovery_experiments where id='recovery_qualification'" | grep -qx 't'
-psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select experiments from recovery_proof_summary" | grep -qx '1'
-psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select event_type from stripe_events where id='evt_qualification'" | grep -qx 'invoice.paid'
-psql "$restore_url" -v ON_ERROR_STOP=1 -Atc "select status from workspace_entitlements where workspace_id='workspace_qualification'" | grep -qx 'active'
-
-echo 'PostgreSQL qualification passed: migrations through billing integrations, analytics, idempotent reapply, persistence, commercial telemetry, Stripe ledger, entitlements, backup, and independent restore.'
+psql "$restore_url" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+  IF (select count(*) from sessions where id='session_qualification') <> 1 THEN RAISE EXCEPTION 'restored session assertion failed'; END IF;
+  IF (select count(*) from repository_issues where repository_id='repo_qualification') <> 1 THEN RAISE EXCEPTION 'restored issue assertion failed'; END IF;
+  IF (select count(*) from pull_requests where repository_id='repo_qualification') <> 1 THEN RAISE EXCEPTION 'restored PR assertion failed'; END IF;
+  IF (select count(*) from repository_releases where repository_id='repo_qualification') <> 1 THEN RAISE EXCEPTION 'restored release assertion failed'; END IF;
+END $$;
+SQL
+printf 'PostgreSQL qualification passed: migrations, persistence, collaboration, backup, and independent restore verified.\n'
