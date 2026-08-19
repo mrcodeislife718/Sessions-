@@ -28,8 +28,9 @@ export default function HomePage() {
         <div className="sessions-nav-links">
           <a href="#product">Product</a>
           <a href="#approach">Why Sessions</a>
+          <Link href="/pricing">Pricing</Link>
           <Link href="/dashboard">Repositories</Link>
-          <Link href="/dashboard" className="button sessions-primary">Get started</Link>
+          <Link href="/pricing" className="button sessions-primary">Get started</Link>
         </div>
       </nav>
 
@@ -42,7 +43,7 @@ export default function HomePage() {
             AI systems, and AI agents — with the repository workflow developers already understand.
           </p>
           <div className="sessions-hero-actions">
-            <Link href="/dashboard" className="button button-large sessions-primary">Get started</Link>
+            <Link href="/pricing" className="button button-large sessions-primary">See plans and start</Link>
             <a href="#approach" className="button button-large sessions-secondary">See how Sessions works</a>
           </div>
           <div className="sessions-trust-line">
@@ -126,7 +127,7 @@ export default function HomePage() {
           <h2>Use the Git and GitHub workflow you already understand. Gain evidence, intelligence, provenance, and recovery underneath it.</h2>
           <p>Sessions keeps repositories, commits, branches, pull requests, Actions, releases, deployments, execution history, verification, and recovery connected without forcing developers to relearn source control.</p>
         </div>
-        <Link href="/dashboard" className="button button-large sessions-primary">Open Sessions</Link>
+        <Link href="/pricing" className="button button-large sessions-primary">Start with Sessions</Link>
       </section>
     </main>
   );
