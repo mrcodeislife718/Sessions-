@@ -12,7 +12,9 @@ import {
   verifyRepositoryIntegrity,
 } from "@sessions/native-repository";
 
-const api = () => vscode.workspace.getConfiguration("sessions").get<string>("apiUrl") ?? "http://localhost:4000";
+const api = () => (vscode.workspace.getConfiguration("sessions").get<string>("apiUrl") ?? "http://localhost:4000").replace(/\/$/, "");
+let extensionContext: vscode.ExtensionContext | undefined;
+const output = vscode.window.createOutputChannel("Sessions");
 
 type Aggregate = {
   session: { id: string; objective: string; repository_id: string };
@@ -28,10 +30,15 @@ function rootPath(): string {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const response = await fetch(`${api()}${path}`, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-  return body;
+  const headers = new Headers(init?.headers);
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  const token = await extensionContext?.secrets.get("sessions.apiToken");
+  if (token) headers.set("authorization", `Bearer ${token}`);
+  const response = await fetch(`${api()}${path}`, { ...init, headers });
+  const contentType = response.headers.get("content-type") ?? "";
+  const body = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) throw new Error(typeof body === "object" && body && "error" in body ? String((body as any).error) : `HTTP ${response.status}`);
+  return body as any;
 }
 
 function command(context: vscode.ExtensionContext, id: string, handler: () => Promise<void>) {
@@ -42,6 +49,8 @@ function command(context: vscode.ExtensionContext, id: string, handler: () => Pr
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  extensionContext = context;
+  context.subscriptions.push(output);
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
   statusBar.command = "sessions.timeline";
   statusBar.text = "$(sync~spin) Sessions";
@@ -54,16 +63,38 @@ export function activate(context: vscode.ExtensionContext) {
 
   command(context, "sessions.refresh", async () => provider.refresh());
 
+  command(context, "sessions.connectHosted", async () => {
+    const current = api();
+    const apiUrl = await vscode.window.showInputBox({ prompt: "Sessions hosted API URL", value: current === "http://localhost:4000" ? "https://" : current, ignoreFocusOut: true });
+    if (!apiUrl || !/^https?:\/\//.test(apiUrl)) return;
+    const token = await vscode.window.showInputBox({ prompt: "Workspace-scoped Sessions token", password: true, ignoreFocusOut: true });
+    if (!token) return;
+    await vscode.workspace.getConfiguration("sessions").update("apiUrl", apiUrl.replace(/\/$/, ""), vscode.ConfigurationTarget.Global);
+    await context.secrets.store("sessions.apiToken", token.trim());
+    const ready = await request("/ready");
+    provider.refresh();
+    vscode.window.showInformationMessage(`Sessions connected to ${apiUrl}${ready?.database ? ` (${ready.database})` : ""}`);
+  });
+
+  command(context, "sessions.disconnectHosted", async () => {
+    await context.secrets.delete("sessions.apiToken");
+    await vscode.workspace.getConfiguration("sessions").update("apiUrl", "http://localhost:4000", vscode.ConfigurationTarget.Global);
+    provider.refresh();
+    vscode.window.showInformationMessage("Sessions hosted connection removed.");
+  });
+
+  command(context, "sessions.billing", async () => {
+    const billing = await request("/api/billing/subscription");
+    output.clear(); output.appendLine(JSON.stringify(billing, null, 2)); output.show(true);
+  });
+
   command(context, "sessions.start", async () => {
     const objective = await vscode.window.showInputBox({ prompt: "What are you trying to accomplish?", placeHolder: "Fix authentication regression" });
     if (!objective) return;
     const root = rootPath();
     const repository = await openRepository(root);
     const workstream = await getActiveWorkstream(root);
-    const created = await request("/api/sessions", {
-      method: "POST",
-      body: JSON.stringify({ objective, repositoryId: repository.id, projectId: workstream.id }),
-    });
+    const created = await request("/api/sessions", { method: "POST", body: JSON.stringify({ objective, repositoryId: repository.id, projectId: workstream.id }) });
     await context.workspaceState.update("sessions.currentSessionId", created.session.id);
     provider.refresh();
     vscode.window.showInformationMessage(`Session started: ${objective}`);
@@ -167,10 +198,13 @@ class SessionsOverviewProvider implements vscode.TreeDataProvider<vscode.TreeIte
       const sessionId = this.context.workspaceState.get<string>("sessions.currentSessionId");
       if (sessionId) this.aggregate ??= await request(`/api/sessions/${sessionId}`).catch(() => undefined) as Aggregate | undefined;
       const verifications = this.aggregate?.verifications ?? [];
-      const passed = verifications.filter((item) => item.status === "passed").length;
-      this.setStatus(`$(source-control) Sessions: ${source.workstream.name} · ${source.stagedChanges.length} staged · ${source.unstagedChanges.length} changed`);
+      const passed = verifications.filter((entry) => entry.status === "passed").length;
+      const hostedToken = await this.context.secrets.get("sessions.apiToken");
+      const hosted = Boolean(hostedToken) && !api().includes("localhost");
+      this.setStatus(`$(source-control) Sessions: ${source.workstream.name} · ${source.stagedChanges.length} staged · ${source.unstagedChanges.length} changed${hosted ? " · hosted" : ""}`);
 
       const items = [
+        item(`Connection  ${hosted ? api() : "Local"}`, hosted ? "sessions.billing" : "sessions.connectHosted", hosted ? "Open billing/status" : "Connect to hosted Sessions"),
         item(`Workstream  ${source.workstream.name}`, "sessions.switchWorkstream", "Current line of work"),
         item(`Head  ${source.headCheckpoint?.friendlyName ?? "No Checkpoint"}`, undefined, source.headCheckpoint?.id),
         item(`Staged Changes  ${source.stagedChanges.length}`, "sessions.stageAll", "Changes captured for the next Checkpoint"),
@@ -198,4 +232,4 @@ function item(label: string, commandId?: string, tooltip?: string) {
   return tree;
 }
 
-export function deactivate() {}
+export function deactivate() { extensionContext = undefined; }
