@@ -53,5 +53,7 @@ grep -q 'build api billing web runner' scripts/rollback-production.sh
 grep -q 'SESSIONS_SLO_READY_MS' scripts/check-production-slo.sh
 grep -q '/webhooks/stripe' infrastructure/docker/Caddyfile
 grep -q 'reverse_proxy billing:4100' infrastructure/docker/Caddyfile
+grep -q 'header Authorization \*' infrastructure/docker/Caddyfile
+grep -q 'rewrite \* /api/sessions' infrastructure/docker/Caddyfile
 
-echo 'Production Compose, Stripe billing, and operational deployment configuration validated.'
+echo 'Production Compose, Stripe billing, authenticated onboarding, and operational deployment configuration validated.'
