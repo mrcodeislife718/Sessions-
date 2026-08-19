@@ -1,60 +1,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-
-const api = process.env.SESSIONS_API_URL ?? "http://localhost:4000";
-
-async function request(path: string, init?: RequestInit) {
-  const response = await fetch(`${api}${path}`, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
-  const text = await response.text();
-  if (!response.ok) throw new Error(text || `Sessions API ${response.status}`);
-  return text ? JSON.parse(text) : {};
-}
-
-const server = new McpServer({ name: "sessions", version: "0.1.0" });
-
-server.tool(
-  "sessions_start",
-  "Start a Sessions execution record for a repository objective.",
-  { repositoryId: z.string().min(1), objective: z.string().min(1), actorId: z.string().optional(), actorKind: z.enum(["human", "ai_agent", "ai_system", "service"]).optional(), displayName: z.string().optional() },
-  async ({ repositoryId, objective, actorId, actorKind, displayName }) => {
-    const body = await request("/api/sessions", { method: "POST", body: JSON.stringify({ repositoryId, objective, actor: actorId ? { id: actorId, kind: actorKind ?? "ai_system", displayName: displayName ?? actorId } : undefined }) });
-    return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
-  },
-);
-
-server.tool(
-  "sessions_record_event",
-  "Append an attributable execution event to a Session.",
-  { sessionId: z.string().min(1), type: z.string().min(1), message: z.string().optional(), actorId: z.string().optional(), actorKind: z.enum(["human", "ai_agent", "ai_system", "service"]).optional(), displayName: z.string().optional() },
-  async ({ sessionId, type, message, actorId, actorKind, displayName }) => {
-    const body = await request(`/api/sessions/${sessionId}/events`, { method: "POST", body: JSON.stringify({ type, payload: { message }, actor: actorId ? { id: actorId, kind: actorKind ?? "ai_system", displayName: displayName ?? actorId } : undefined }) });
-    return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
-  },
-);
-
-server.tool(
-  "sessions_get",
-  "Get the current Session aggregate including timeline, snapshots, and verification evidence.",
-  { sessionId: z.string().min(1) },
-  async ({ sessionId }) => ({ content: [{ type: "text", text: JSON.stringify(await request(`/api/sessions/${sessionId}`), null, 2) }] }),
-);
-
-server.tool(
-  "sessions_replay",
-  "Return the recorded event replay plan for a Session.",
-  { sessionId: z.string().min(1) },
-  async ({ sessionId }) => ({ content: [{ type: "text", text: JSON.stringify(await request(`/api/sessions/${sessionId}/replay`, { method: "POST", body: "{}" }), null, 2) }] }),
-);
-
-server.tool(
-  "sessions_rollback",
-  "Prepare a rollback request targeting a recorded CodeVault snapshot.",
-  { sessionId: z.string().min(1), snapshotId: z.string().min(1), actorId: z.string().optional(), actorKind: z.enum(["human", "ai_agent", "ai_system", "service"]).optional(), displayName: z.string().optional() },
-  async ({ sessionId, snapshotId, actorId, actorKind, displayName }) => {
-    const body = await request(`/api/sessions/${sessionId}/rollback`, { method: "POST", body: JSON.stringify({ snapshotId, actor: actorId ? { id: actorId, kind: actorKind ?? "ai_system", displayName: displayName ?? actorId } : undefined }) });
-    return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
-  },
-);
-
+const api=process.env.SESSIONS_API_URL??"http://localhost:4000";const token=process.env.SESSIONS_API_TOKEN;
+async function request(path:string,init?:RequestInit){const response=await fetch(`${api}${path}`,{...init,headers:{"content-type":"application/json",...(token?{authorization:`Bearer ${token}`}:{ }),...(init?.headers??{})}});const text=await response.text();if(!response.ok)throw new Error(text||`Sessions API ${response.status}`);return text?JSON.parse(text):{}}
+const server=new McpServer({name:"sessions",version:"0.2.0"});const out=(body:unknown)=>({content:[{type:"text" as const,text:JSON.stringify(body,null,2)}]});
+server.tool("sessions_start","Start a Sessions execution record.",{repositoryId:z.string().min(1),objective:z.string().min(1)},async x=>out(await request("/api/sessions",{method:"POST",body:JSON.stringify(x)})));
+server.tool("sessions_get","Get a Session aggregate.",{sessionId:z.string().min(1)},async({sessionId})=>out(await request(`/api/sessions/${sessionId}`)));
+server.tool("sessions_record_event","Append attributable execution evidence.",{sessionId:z.string().min(1),type:z.string().min(1),message:z.string().optional()},async({sessionId,...x})=>out(await request(`/api/sessions/${sessionId}/events`,{method:"POST",body:JSON.stringify({type:x.type,payload:{message:x.message}})})));
+server.tool("sessions_replay","Replay recorded execution lineage.",{sessionId:z.string().min(1)},async({sessionId})=>out(await request(`/api/sessions/${sessionId}/replay`,{method:"POST",body:"{}"})));
+server.tool("sessions_rollback","Prepare protected recovery.",{sessionId:z.string().min(1),snapshotId:z.string().min(1)},async({sessionId,snapshotId})=>out(await request(`/api/sessions/${sessionId}/rollback`,{method:"POST",body:JSON.stringify({snapshotId})})));
+server.tool("sessions_issue_create","Create a repository issue.",{repositoryId:z.string(),title:z.string(),body:z.string().optional()},async({repositoryId,...x})=>out(await request(`/api/repositories/${repositoryId}/issues`,{method:"POST",body:JSON.stringify(x)})));
+server.tool("sessions_pull_request_create","Create a pull request.",{repositoryId:z.string(),title:z.string(),baseBranch:z.string(),headBranch:z.string(),headCommitId:z.string().optional()},async({repositoryId,...x})=>out(await request(`/api/repositories/${repositoryId}/pulls`,{method:"POST",body:JSON.stringify(x)})));
+server.tool("sessions_pull_request_review","Review a pull request with attributable provenance.",{repositoryId:z.string(),number:z.number().int().positive(),state:z.enum(["commented","approved","changes_requested","dismissed"]),body:z.string().optional()},async({repositoryId,number,...x})=>out(await request(`/api/repositories/${repositoryId}/pulls/${number}/reviews`,{method:"POST",body:JSON.stringify(x)})));
+server.tool("sessions_pull_request_merge","Merge only after Sessions merge gates pass.",{repositoryId:z.string(),number:z.number().int().positive(),mergeCommitId:z.string().optional()},async({repositoryId,number,mergeCommitId})=>out(await request(`/api/repositories/${repositoryId}/pulls/${number}/merge`,{method:"POST",body:JSON.stringify({mergeCommitId})})));
+server.tool("sessions_action_run","Queue Actions checks and durable evidence.",{repositoryId:z.string(),trigger:z.string(),commitId:z.string().optional(),pullRequestId:z.string().optional()},async({repositoryId,...x})=>out(await request(`/api/repositories/${repositoryId}/actions`,{method:"POST",body:JSON.stringify(x)})));
+server.tool("sessions_release_create","Publish a release tied to a verified commit.",{repositoryId:z.string(),tagName:z.string(),commitId:z.string(),name:z.string().optional()},async({repositoryId,...x})=>out(await request(`/api/repositories/${repositoryId}/releases`,{method:"POST",body:JSON.stringify(x)})));
+server.tool("sessions_deploy","Create a deployment record with durable evidence.",{repositoryId:z.string(),commitId:z.string(),environment:z.string(),releaseId:z.string().optional()},async({repositoryId,...x})=>out(await request(`/api/repositories/${repositoryId}/deployments`,{method:"POST",body:JSON.stringify(x)})));
 await server.connect(new StdioServerTransport());
