@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 const billingUrl = process.env.BILLING_URL ?? "http://127.0.0.1:4100";
+const sessionsApiUrl = process.env.SESSIONS_API_QUALIFICATION_URL ?? "http://127.0.0.1:4000";
 const token = process.env.BILLING_TEST_TOKEN ?? "sessions-billing-test-token";
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "whsec_qualification";
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://sessions:sessions@localhost:5432/sessions";
@@ -17,15 +18,27 @@ function psql(sql, expectSuccess = true) {
   return run.stdout.trim();
 }
 
-async function api(path, init = {}) {
+async function authenticatedFetch(base, path, init = {}) {
   const headers = new Headers(init.headers);
   headers.set("authorization", `Bearer ${token}`);
   if (!headers.has("content-type")) headers.set("content-type", "application/json");
-  const response = await fetch(`${billingUrl}${path}`, { ...init, headers });
+  const response = await fetch(`${base}${path}`, { ...init, headers });
   const contentType = response.headers.get("content-type") ?? "";
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
-  if (!response.ok) throw new Error(`${path} failed (${response.status}): ${JSON.stringify(body)}`);
   return { response, body };
+}
+
+async function api(path, init = {}) {
+  const result = await authenticatedFetch(billingUrl, path, init);
+  if (!result.response.ok) throw new Error(`${path} failed (${result.response.status}): ${JSON.stringify(result.body)}`);
+  return result;
+}
+
+async function createSession(objective) {
+  return authenticatedFetch(sessionsApiUrl, "/api/sessions", {
+    method: "POST",
+    body: JSON.stringify({ repositoryId: "repo_billing_qualification", projectId: "project_billing", objective }),
+  });
 }
 
 async function webhook(event) {
@@ -84,19 +97,26 @@ try {
   await webhook({ id: "evt_failed_qualification", type: "invoice.payment_failed", created: 1_800_000_300, livemode: false, data: { object: { id: "in_failed", customer: "cus_qualification", subscription: "sub_qualification" } } });
   assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "payment_failed", "payment failure did not suspend writes");
   psql("insert into sessions(id,workspace_id,project_id,repository_id,objective) values('session_should_fail','workspace_billing_qualification','project_billing','repo_billing_qualification','must be blocked')", false);
+  const suspendedApiWrite = await createSession("API write must be suspended");
+  assert(suspendedApiWrite.response.status === 402, `suspended API write returned ${suspendedApiWrite.response.status} instead of 402`);
+  assert(String(suspendedApiWrite.body?.error ?? "").includes("billing entitlement"), "suspended API write did not return an actionable billing error");
 
   await webhook({ id: "evt_stale_paid_qualification", type: "invoice.paid", created: 1_800_000_200, livemode: false, data: { object: { id: "in_stale_paid", status: "paid", customer: "cus_qualification", subscription: "sub_qualification" } } });
   assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "payment_failed", "older out-of-order paid event incorrectly restored entitlement");
-  psql("insert into sessions(id,workspace_id,project_id,repository_id,objective) values('session_still_blocked','workspace_billing_qualification','project_billing','repo_billing_qualification','must remain blocked')", false);
+  const staleApiWrite = await createSession("Stale Stripe event must not restore writes");
+  assert(staleApiWrite.response.status === 402, "out-of-order stale event incorrectly restored API writes");
 
   await webhook({ id: "evt_paid_qualification", type: "invoice.paid", created: 1_800_000_400, livemode: false, data: { object: { id: "in_paid", status: "paid", customer: "cus_qualification", subscription: "sub_qualification" } } });
   assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "active", "newer successful payment did not restore entitlement");
-  psql("insert into sessions(id,workspace_id,project_id,repository_id,objective) values('session_after_recovery','workspace_billing_qualification','project_billing','repo_billing_qualification','writes restored') on conflict(id) do nothing");
+  const recoveredApiWrite = await createSession("API writes restored after payment recovery");
+  assert(recoveredApiWrite.response.status === 201, `recovered API write returned ${recoveredApiWrite.response.status} instead of 201`);
+  const recoveredSessionId = recoveredApiWrite.body?.session?.id;
+  assert(recoveredSessionId, "recovered API write did not return a Session id");
 
   const exported = await api("/api/account/export", { method: "POST", body: "{}" });
   assert(exported.body.schemaVersion === 2, "export schema version was not advanced");
   assert(exported.body.workspace?.id === "workspace_billing_qualification", "export did not contain workspace data");
-  assert(exported.body.sessions?.some((session) => session.id === "session_after_recovery"), "export did not include Sessions data");
+  assert(exported.body.sessions?.some((session) => session.id === recoveredSessionId), "export did not include the recovered API-created Session");
   assert(Array.isArray(exported.body.snapshots) && Array.isArray(exported.body.verifications), "export did not include recovery and verification collections");
   assert(Array.isArray(exported.body.billingAccounts) && Array.isArray(exported.body.entitlements), "export did not include account and entitlement state");
   assert((exported.response.headers.get("content-disposition") ?? "").includes("attachment"), "export is not downloadable");
@@ -114,8 +134,9 @@ try {
   assert(psql("select count(*) from stripe_events") === "4", "Stripe event ledger count is incorrect");
   assert(psql("select count(*) from cancellation_records where billing_account_id='billing_billing_qualification'") === "1", "cancellation record missing");
   assert(psql("select status from data_export_requests where workspace_id='workspace_billing_qualification' order by requested_at desc limit 1") === "ready", "export request did not reach ready state");
+  assert(Number(psql("select count(*) from audit_events where workspace_id='workspace_billing_qualification' and outcome='denied'")) >= 2, "billing-suspended API denials were not audited");
 
-  console.log(JSON.stringify({ qualification: "billing-control-plane", passed: true, stripeEvents: 4, duplicateSafety: true, outOfOrderSafety: true, entitlementRecovery: true, export: true, cancellation: true }, null, 2));
+  console.log(JSON.stringify({ qualification: "billing-control-plane", passed: true, stripeEvents: 4, duplicateSafety: true, outOfOrderSafety: true, entitlementRecovery: true, apiPaymentResponse: 402, export: true, cancellation: true }, null, 2));
 } finally {
   await new Promise((resolve) => stripeMock.close(resolve));
 }
