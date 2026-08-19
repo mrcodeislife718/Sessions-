@@ -21,7 +21,8 @@ export function verifyStripeSignature(payload: Buffer, header: string, secret: s
 }
 
 export async function stripeRequest(secretKey: string, path: string, params: URLSearchParams, method = "POST"): Promise<any> {
-  const response = await fetch(`https://api.stripe.com/v1/${path}`, {
+  const base = (process.env.STRIPE_API_BASE ?? "https://api.stripe.com/v1").replace(/\/$/, "");
+  const response = await fetch(`${base}/${path}`, {
     method,
     headers: { authorization: `Bearer ${secretKey}`, "content-type": "application/x-www-form-urlencoded" },
     body: method === "GET" ? undefined : params.toString(),
