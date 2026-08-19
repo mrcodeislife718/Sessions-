@@ -61,9 +61,10 @@ test(
       await pool.query("insert into sessions_repository_checkpoints(repository_id,checkpoint_id,record) values($1,$2,$3)",[repositoryId,checkpointId,JSON.stringify(checkpoint)]);
       await pool.query("insert into sessions_repository_refs(repository_id,ref_type,name,checkpoint_id,metadata) values($1,'branch','feature',$2,$3)",[repositoryId,checkpointId,JSON.stringify({id:"workstream_feature"})]);
 
-      const pull = await pool.query("insert into pull_requests(workspace_id,repository_id,number,title,base_branch,head_branch,head_commit_id,author_principal_id,required_approvals) values($1,$2,1,'Native PR','main','feature',$3,$4,0) returning id,verification_state",[workspaceId,repositoryId,checkpointId,principalId]);
+      const pull = await pool.query("insert into pull_requests(workspace_id,repository_id,number,title,base_branch,head_branch,head_commit_id,author_principal_id,required_approvals) values($1,$2,1,'Native PR','main','feature',$3,$4,0) returning id,verification_state,mergeable",[workspaceId,repositoryId,checkpointId,principalId]);
       const pullRequestId = pull.rows[0].id as string;
       assert.equal(pull.rows[0].verification_state, "pending");
+      assert.equal(pull.rows[0].mergeable, false);
 
       await pool.query("insert into action_runs(id,workspace_id,repository_id,commit_id,pull_request_id,trigger,status,actor_principal_id) values($1,$2,$3,$4,$5,'pull_request','queued',$6)",[actionRunId,workspaceId,repositoryId,checkpointId,pullRequestId,principalId]);
       for (const [name, category] of [["Source integrity","verification"],["Repository policy","policy"],["Recovery readiness","verification"]] as const) {
@@ -94,7 +95,7 @@ test(
 
       const verifiedPull = await pool.query("select verification_state,mergeable from pull_requests where id=$1",[pullRequestId]);
       assert.equal(verifiedPull.rows[0]?.verification_state, "passed");
-      assert.equal(verifiedPull.rows[0]?.mergeable, true);
+      assert.equal(verifiedPull.rows[0]?.mergeable, false);
     } finally {
       await pool.query("delete from organizations where id=$1",[organizationId]).catch(()=>undefined);
       await pool.end();
