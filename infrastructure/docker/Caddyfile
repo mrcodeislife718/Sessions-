@@ -15,6 +15,11 @@
     reverse_proxy auth:4200
   }
 
+  @repositories path /api/repositories /api/repositories/*
+  handle @repositories {
+    reverse_proxy repositories:4300
+  }
+
   @billing path /api/billing/* /api/account/* /webhooks/stripe
   handle @billing {
     reverse_proxy billing:4100
