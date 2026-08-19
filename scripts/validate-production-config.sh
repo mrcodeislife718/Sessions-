@@ -24,6 +24,10 @@ grep -q '004-production-controls.sql' "$rendered"
 grep -q '005-commercial-operations.sql' "$rendered"
 grep -q '006-product-analytics.sql' "$rendered"
 grep -q '007-billing-integrations.sql' "$rendered"
+grep -q '008-repository-collaboration.sql' "$rendered"
+grep -q '009-lifecycle-evidence-events.sql' "$rendered"
+grep -q '010-hosted-auth.sql' "$rendered"
+grep -q 'Dockerfile.auth' "$rendered"
 grep -q 'Dockerfile.billing' "$rendered"
 grep -q 'STRIPE_SECRET_KEY: sk_test_qualification' "$rendered"
 grep -q 'STRIPE_WEBHOOK_SECRET: whsec_qualification' "$rendered"
@@ -45,15 +49,24 @@ for script in \
 done
 
 grep -q 'backup-production.sh' scripts/deploy-production.sh
-grep -q '007-billing-integrations.sql' scripts/deploy-production.sh
-grep -q 'build --pull api billing web runner' scripts/deploy-production.sh
+grep -q '010-hosted-auth.sql' scripts/deploy-production.sh
+grep -q '011-repository-onboarding.sql' scripts/deploy-production.sh
+grep -q '012-sessions-native-repository.sql' scripts/deploy-production.sh
+grep -q 'build --pull api auth billing web runner' scripts/deploy-production.sh
+grep -q 'up -d --no-deps api auth billing runner' scripts/deploy-production.sh
 grep -q 'https://${SESSIONS_DOMAIN}/ready' scripts/deploy-production.sh
+grep -q 'SESSIONS_RELEASE_ID' scripts/deploy-production.sh
 grep -q 'ROLLBACK_REF' scripts/rollback-production.sh
-grep -q 'build api billing web runner' scripts/rollback-production.sh
 grep -q 'SESSIONS_SLO_READY_MS' scripts/check-production-slo.sh
 grep -q '/webhooks/stripe' infrastructure/docker/Caddyfile
 grep -q 'reverse_proxy billing:4100' infrastructure/docker/Caddyfile
+grep -q 'reverse_proxy auth:4200' infrastructure/docker/Caddyfile
 grep -q 'header Authorization \*' infrastructure/docker/Caddyfile
 grep -q 'rewrite \* /api/sessions' infrastructure/docker/Caddyfile
 
-echo 'Production Compose, Stripe billing, authenticated onboarding, and operational deployment configuration validated.'
+test -s infrastructure/postgres/012-sessions-native-repository.sql
+grep -q 'sessions_repository_objects' infrastructure/postgres/012-sessions-native-repository.sql
+grep -q 'sessions_repository_checkpoints' infrastructure/postgres/012-sessions-native-repository.sql
+grep -q 'sessions_repository_refs' infrastructure/postgres/012-sessions-native-repository.sql
+
+echo 'Production Compose, hosted auth, Stripe billing, Sessions-native repository transport, and operational deployment configuration validated.'
