@@ -20,6 +20,7 @@ alter table billing_accounts add column if not exists external_provider text;
 alter table billing_accounts add column if not exists payment_state text not null default 'ok';
 alter table subscriptions add column if not exists cancel_at_period_end boolean not null default false;
 alter table subscriptions add column if not exists canceled_at timestamptz;
+create unique index if not exists idx_subscriptions_external_ref on subscriptions(external_subscription_ref) where external_subscription_ref is not null;
 
 create or replace function sessions_assert_workspace_entitled(target_workspace text)
 returns void language plpgsql as $$
