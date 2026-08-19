@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 type Ref={ref_type:string;name:string;checkpoint_id?:string|null};
 type RepositoryState={repository:{name:string};refs:Ref[]};
@@ -68,5 +68,5 @@ export function NewPullRequestClient({id}:{id:string}){
   </main>;
 }
 
-const fieldStyle:React.CSSProperties={minHeight:42,borderRadius:9,border:"1px solid var(--border)",background:"#0b1017",color:"var(--text)",padding:"0 11px",font:"inherit",width:"100%"};
-const labelStyle:React.CSSProperties={display:"grid",gap:7,color:"var(--muted)",fontSize:12,marginBottom:16};
+const fieldStyle:CSSProperties={minHeight:42,borderRadius:9,border:"1px solid var(--border)",background:"#0b1017",color:"var(--text)",padding:"0 11px",font:"inherit",width:"100%"};
+const labelStyle:CSSProperties={display:"grid",gap:7,color:"var(--muted)",fontSize:12,marginBottom:16};
