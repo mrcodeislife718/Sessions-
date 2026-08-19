@@ -1,7 +1,7 @@
 {
   "name": "sessions-vscode",
   "displayName": "Sessions",
-  "description": "Native development workflow, source control, verification, execution visibility, and recovery for humans and AI.",
+  "description": "Git-familiar source control and collaboration with persistent context, AI provenance, verification, execution visibility, and recovery.",
   "version": "0.1.0",
   "private": true,
   "engines": { "vscode": "^1.95.0" },
@@ -14,30 +14,30 @@
         "sessions.apiUrl": {
           "type": "string",
           "default": "http://localhost:4000",
-          "description": "Sessions control-plane API URL. Hosted tokens are stored separately in VS Code SecretStorage."
+          "description": "Sessions API URL. Hosted tokens are stored separately in VS Code SecretStorage."
         }
       }
     },
     "commands": [
       { "command": "sessions.refresh", "title": "Sessions: Refresh" },
-      { "command": "sessions.connectHosted", "title": "Sessions: Connect to Hosted Sessions" },
-      { "command": "sessions.disconnectHosted", "title": "Sessions: Disconnect Hosted Sessions" },
-      { "command": "sessions.billing", "title": "Sessions: Show Billing & Entitlement Status" },
+      { "command": "sessions.connectHosted", "title": "Sessions: Sign In" },
+      { "command": "sessions.disconnectHosted", "title": "Sessions: Sign Out" },
+      { "command": "sessions.billing", "title": "Sessions: Billing and Plans" },
       { "command": "sessions.start", "title": "Sessions: Start Session" },
       { "command": "sessions.stageAll", "title": "Sessions: Stage All Changes" },
       { "command": "sessions.unstageAll", "title": "Sessions: Unstage All Changes" },
-      { "command": "sessions.checkpoint", "title": "Sessions: Create Checkpoint" },
-      { "command": "sessions.switchWorkstream", "title": "Sessions: Switch Workstream" },
-      { "command": "sessions.verify", "title": "Sessions: Verify Current State" },
+      { "command": "sessions.checkpoint", "title": "Sessions: Commit Changes" },
+      { "command": "sessions.switchWorkstream", "title": "Sessions: Switch Branch" },
+      { "command": "sessions.verify", "title": "Sessions: Run Checks" },
       { "command": "sessions.integrity", "title": "Sessions: Verify Repository Integrity" },
-      { "command": "sessions.timeline", "title": "Sessions: Open Timeline" },
-      { "command": "sessions.rollback", "title": "Sessions: Prepare Recovery" }
+      { "command": "sessions.timeline", "title": "Sessions: View History" },
+      { "command": "sessions.rollback", "title": "Sessions: Restore Commit" }
     ],
     "viewsContainers": {
       "activitybar": [{ "id": "sessions", "title": "Sessions", "icon": "resources/icon.svg" }]
     },
     "views": {
-      "sessions": [{ "id": "sessions.overview", "name": "Source Control & Session" }]
+      "sessions": [{ "id": "sessions.overview", "name": "Source Control" }]
     }
   },
   "scripts": {
