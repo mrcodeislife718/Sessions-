@@ -18,6 +18,15 @@ class HttpError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }
 
+function normalizedHttpError(error: unknown): HttpError | null {
+  if (error instanceof HttpError) return error;
+  const candidate = error as { code?: string; message?: string } | null;
+  if (candidate?.code === "42501" && candidate.message?.includes("workspace entitlement does not allow writes")) {
+    return new HttpError(402, "workspace writes are suspended by the current billing entitlement; review billing status or restore an active subscription");
+  }
+  return null;
+}
+
 async function jsonBody(req: http.IncomingMessage): Promise<any> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -243,12 +252,13 @@ const server = http.createServer(async (req, res) => {
 
     throw new HttpError(405, "method not allowed");
   } catch (error) {
-    const status = error instanceof HttpError ? error.status : 500;
-    const message = error instanceof Error ? error.message : "internal error";
+    const normalized = normalizedHttpError(error);
+    const status = normalized?.status ?? 500;
+    const message = normalized?.message ?? (error instanceof Error ? error.message : "internal error");
     incrementMetric(status >= 500 ? "requests_error_total" : "requests_rejected_total");
     structuredLog(status >= 500 ? "error" : "warn", "request.failed", { requestId: reqId, status, message, principalId: identity?.principalId, workspaceId: identity?.workspaceId });
-    if (identity && status === 403) {
-      try { await audit(identity, reqId, "request.authorization", "request", null, "denied", { message }); } catch (auditError) { structuredLog("error", "audit.failed", { requestId: reqId, error: String(auditError) }); }
+    if (identity && (status === 402 || status === 403)) {
+      try { await audit(identity, reqId, "request.authorization", "request", null, "denied", { message, status }); } catch (auditError) { structuredLog("error", "audit.failed", { requestId: reqId, error: String(auditError) }); }
     }
     return send(res, status, { error: status >= 500 ? "internal error" : message }, reqId);
   } finally {
