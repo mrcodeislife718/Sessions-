@@ -12,46 +12,31 @@ services:
       - sessions_caddy_data:/data
       - sessions_caddy_config:/config
     depends_on:
-      web:
-        condition: service_healthy
-      api:
-        condition: service_healthy
-      billing:
-        condition: service_healthy
-      auth:
-        condition: service_healthy
-      repositories:
-        condition: service_healthy
-    networks:
-      - edge
-      - control
-    security_opt:
-      - no-new-privileges:true
+      web: { condition: service_healthy }
+      api: { condition: service_healthy }
+      billing: { condition: service_healthy }
+      auth: { condition: service_healthy }
+      repositories: { condition: service_healthy }
+      workflows: { condition: service_healthy }
+    networks: [edge, control]
+    security_opt: [no-new-privileges:true]
 
   web:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.web
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.web }
     restart: unless-stopped
     environment:
       NODE_ENV: production
       SESSIONS_API_URL: http://api:4000
       NEXT_PUBLIC_SESSIONS_API_URL: https://${SESSIONS_DOMAIN}
       NEXT_PUBLIC_SESSIONS_BILLING_URL: https://${SESSIONS_DOMAIN}
-    expose:
-      - "3000"
+    expose: ["3000"]
     depends_on:
-      api:
-        condition: service_healthy
-    networks:
-      - control
+      api: { condition: service_healthy }
+    networks: [control]
     read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    tmpfs: [/tmp:size=64m,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000 >/dev/null || exit 1"]
       interval: 15s
@@ -60,9 +45,7 @@ services:
       start_period: 20s
 
   api:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.api
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.api }
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -80,23 +63,15 @@ services:
       SESSIONS_DB_POOL_MAX: ${SESSIONS_DB_POOL_MAX:-20}
       SESSIONS_REPOSITORY_METADATA_BYTES: ${SESSIONS_REPOSITORY_METADATA_BYTES:-16777216}
       SESSIONS_REPOSITORY_OBJECT_BYTES: ${SESSIONS_REPOSITORY_OBJECT_BYTES:-134217728}
-    expose:
-      - "4000"
+    expose: ["4000"]
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - control
-      - data
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [control, data]
     read_only: true
-    tmpfs:
-      - /tmp:size=128m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    tmpfs: [/tmp:size=128m,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
     pids_limit: 256
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4000/ready >/dev/null || exit 1"]
@@ -106,9 +81,7 @@ services:
       start_period: 15s
 
   auth:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.auth
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.auth }
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -117,21 +90,14 @@ services:
       SESSIONS_MAX_BODY_BYTES: ${SESSIONS_MAX_BODY_BYTES:-1048576}
       SESSIONS_AUTH_RATE_LIMIT: ${SESSIONS_AUTH_RATE_LIMIT:-20}
       SESSIONS_AUTH_DB_POOL_MAX: ${SESSIONS_AUTH_DB_POOL_MAX:-10}
-    expose:
-      - "4200"
+    expose: ["4200"]
     depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - control
-      - data
+      postgres: { condition: service_healthy }
+    networks: [control, data]
     read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    tmpfs: [/tmp:size=64m,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
     pids_limit: 128
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4200/health >/dev/null || exit 1"]
@@ -141,9 +107,7 @@ services:
       start_period: 15s
 
   repositories:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.repositories
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.repositories }
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -151,21 +115,14 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB required}
       SESSIONS_MAX_BODY_BYTES: ${SESSIONS_MAX_BODY_BYTES:-1048576}
       SESSIONS_REPOSITORY_DB_POOL_MAX: ${SESSIONS_REPOSITORY_DB_POOL_MAX:-10}
-    expose:
-      - "4300"
+    expose: ["4300"]
     depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - control
-      - data
+      postgres: { condition: service_healthy }
+    networks: [control, data]
     read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    tmpfs: [/tmp:size=64m,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
     pids_limit: 128
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4300/health >/dev/null || exit 1"]
@@ -174,10 +131,33 @@ services:
       retries: 5
       start_period: 15s
 
+  workflows:
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.workflows }
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      WORKFLOW_PORT: 4400
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB required}
+      SESSIONS_MAX_BODY_BYTES: ${SESSIONS_MAX_BODY_BYTES:-1048576}
+      SESSIONS_WORKFLOW_DB_POOL_MAX: ${SESSIONS_WORKFLOW_DB_POOL_MAX:-10}
+    expose: ["4400"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [control, data]
+    read_only: true
+    tmpfs: [/tmp:size=64m,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4400/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   billing:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.billing
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.billing }
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -192,21 +172,14 @@ services:
       STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
       STRIPE_PRICE_BUSINESS: ${STRIPE_PRICE_BUSINESS:-}
       STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
-    expose:
-      - "4100"
+    expose: ["4100"]
     depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - control
-      - data
+      postgres: { condition: service_healthy }
+    networks: [control, data]
     read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    tmpfs: [/tmp:size=64m,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
     pids_limit: 128
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4100/health >/dev/null || exit 1"]
@@ -216,9 +189,7 @@ services:
       start_period: 15s
 
   runner:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.runner
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.runner }
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -226,21 +197,38 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
       RUNNER_POLL_MS: ${RUNNER_POLL_MS:-2000}
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - data
-      - runner
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [data, runner]
     read_only: true
-    tmpfs:
-      - /tmp:size=256m,mode=1777
-      - /workspace:size=1g,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    tmpfs: [/tmp:size=256m,mode=1777, /workspace:size=1g,mode=1777]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 256
+
+  executor:
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.executor }
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB required}
+      WORKFLOW_EXECUTOR_POLL_MS: ${WORKFLOW_EXECUTOR_POLL_MS:-1500}
+      SESSIONS_JOB_ROOT: /sessions-jobs
+      SESSIONS_JOB_VOLUME: sessions_jobs
+      SESSIONS_ACTION_LOG_BYTES: ${SESSIONS_ACTION_LOG_BYTES:-2097152}
+      SESSIONS_ACTION_MEMORY: ${SESSIONS_ACTION_MEMORY:-1g}
+      SESSIONS_ACTION_CPUS: ${SESSIONS_ACTION_CPUS:-1.0}
+      SESSIONS_ACTION_PIDS: ${SESSIONS_ACTION_PIDS:-256}
+      DOCKER_HOST: unix:///var/run/docker.sock
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [data]
+    volumes:
+      - sessions_jobs:/sessions-jobs
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    tmpfs: [/tmp:size=128m,mode=1777]
+    security_opt: [no-new-privileges:true]
     pids_limit: 256
 
   postgres:
@@ -265,15 +253,14 @@ services:
       - ./infrastructure/postgres/011-repository-onboarding.sql:/docker-entrypoint-initdb.d/011-repository-onboarding.sql:ro
       - ./infrastructure/postgres/012-sessions-native-repository.sql:/docker-entrypoint-initdb.d/012-sessions-native-repository.sql:ro
       - ./infrastructure/postgres/013-team-invitations.sql:/docker-entrypoint-initdb.d/013-team-invitations.sql:ro
-    networks:
-      - data
+      - ./infrastructure/postgres/014-action-workflows.sql:/docker-entrypoint-initdb.d/014-action-workflows.sql:ro
+    networks: [data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 10
-    security_opt:
-      - no-new-privileges:true
+    security_opt: [no-new-privileges:true]
 
   redis:
     image: redis:7-alpine
@@ -281,17 +268,14 @@ services:
     command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass '$${REDIS_PASSWORD}'"]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
-    volumes:
-      - sessions_redis:/data
-    networks:
-      - data
+    volumes: [sessions_redis:/data]
+    networks: [data]
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a '$${REDIS_PASSWORD}' ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
-    security_opt:
-      - no-new-privileges:true
+    security_opt: [no-new-privileges:true]
 
   minio:
     image: minio/minio:latest
@@ -300,21 +284,15 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER required}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD required}
-    volumes:
-      - sessions_minio:/data
-    networks:
-      - data
-    security_opt:
-      - no-new-privileges:true
+    volumes: [sessions_minio:/data]
+    networks: [data]
+    security_opt: [no-new-privileges:true]
 
 networks:
   edge:
-  control:
-    internal: true
-  data:
-    internal: true
-  runner:
-    internal: true
+  control: { internal: true }
+  data: { internal: true }
+  runner: { internal: true }
 
 volumes:
   sessions_postgres:
@@ -322,3 +300,5 @@ volumes:
   sessions_minio:
   sessions_caddy_data:
   sessions_caddy_config:
+  sessions_jobs:
+    name: sessions_jobs
