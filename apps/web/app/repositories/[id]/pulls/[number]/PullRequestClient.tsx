@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 
 type Review={id:string;state:string;body:string;submitted_at:string};
 type Comment={id:string;body:string;path?:string|null;line?:number|null;created_at:string};
@@ -61,4 +61,4 @@ export function PullRequestClient({id,number}:{id:string;number:number}){
 }
 
 function Metric({label,value}:{label:string;value:string}){return <div className="metric-card"><span>{label}</span><strong style={{fontSize:16}}>{value}</strong></div>}
-const fieldStyle:React.CSSProperties={width:"100%",borderRadius:9,border:"1px solid var(--border)",background:"#0b1017",color:"var(--text)",padding:12,font:"inherit",resize:"vertical"};
+const fieldStyle:CSSProperties={width:"100%",borderRadius:9,border:"1px solid var(--border)",background:"#0b1017",color:"var(--text)",padding:12,font:"inherit",resize:"vertical"};
