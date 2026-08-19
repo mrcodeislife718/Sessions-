@@ -197,12 +197,16 @@ jobs:
       DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
       PGPASSWORD: sessions
       BILLING_PORT: "4100"
+      PORT: "4000"
+      SESSIONS_ALLOW_INSECURE_LOCAL: "false"
+      SESSIONS_CORS_ORIGIN: http://localhost:3000
       BILLING_TEST_TOKEN: sessions-billing-test-token
       STRIPE_SECRET_KEY: sk_test_qualification
       STRIPE_WEBHOOK_SECRET: whsec_qualification
       STRIPE_PRICE_DEVELOPER: price_qualification
       STRIPE_API_BASE: http://127.0.0.1:4242/v1
       SESSIONS_PUBLIC_ORIGIN: https://qualification.sessions.invalid
+      SESSIONS_API_QUALIFICATION_URL: http://127.0.0.1:4000
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -215,21 +219,31 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Seed billing qualification state
         run: bash scripts/seed-billing-qualification.sh
-      - name: Build billing control plane
+      - name: Build API and billing control plane
         run: pnpm --filter @sessions/api build
-      - name: Start billing service
+      - name: Start API and billing services
         run: |
+          node apps/api/dist/index.js > /tmp/sessions-api.log 2>&1 & echo $! > /tmp/sessions-api.pid
           node apps/api/dist/billing-server.js > /tmp/sessions-billing.log 2>&1 & echo $! > /tmp/sessions-billing.pid
-          for i in {1..30}; do if curl --fail --silent http://127.0.0.1:4100/health >/dev/null; then exit 0; fi; sleep 1; done
-          cat /tmp/sessions-billing.log; exit 1
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4000/ready >/dev/null && curl --fail --silent http://127.0.0.1:4100/health >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/sessions-api.log || true
+          cat /tmp/sessions-billing.log || true
+          exit 1
       - name: Qualify Stripe reconciliation and account lifecycle
         run: node scripts/qualify-billing.mjs
-      - name: Capture billing log
+      - name: Capture service logs
         if: always()
-        run: cat /tmp/sessions-billing.log || true
-      - name: Stop billing service
+        run: |
+          cat /tmp/sessions-api.log || true
+          cat /tmp/sessions-billing.log || true
+      - name: Stop services
         if: always()
-        run: test ! -f /tmp/sessions-billing.pid || kill "$(cat /tmp/sessions-billing.pid)" || true
+        run: |
+          test ! -f /tmp/sessions-api.pid || kill "$(cat /tmp/sessions-api.pid)" || true
+          test ! -f /tmp/sessions-billing.pid || kill "$(cat /tmp/sessions-billing.pid)" || true
 
   production-config-qualification:
     name: production deployment configuration qualification
