@@ -24,7 +24,7 @@ echo "[sessions] creating pre-deploy database backup"
 SESSIONS_BACKUP_DIR="$backup_dir" bash scripts/backup-production.sh
 
 echo "[sessions] building Sessions release $release_id"
-"${compose[@]}" build --pull api auth billing repositories web runner
+"${compose[@]}" build --pull api auth billing repositories workflows web runner executor
 
 echo "[sessions] starting data services"
 "${compose[@]}" up -d postgres redis minio
@@ -43,6 +43,7 @@ migrations=(
   infrastructure/postgres/011-repository-onboarding.sql
   infrastructure/postgres/012-sessions-native-repository.sql
   infrastructure/postgres/013-team-invitations.sql
+  infrastructure/postgres/014-action-workflows.sql
 )
 for migration in "${migrations[@]}"; do
   echo "[sessions] applying $migration"
@@ -50,20 +51,23 @@ for migration in "${migrations[@]}"; do
 done
 
 echo "[sessions] rolling application services"
-"${compose[@]}" up -d --no-deps api auth billing repositories runner
+"${compose[@]}" up -d --no-deps api auth billing repositories workflows runner executor
 "${compose[@]}" up -d --no-deps web
 "${compose[@]}" up -d --no-deps proxy
 
 for i in $(seq 1 60); do
-  api_ok=0; billing_ok=0; auth_ok=0; legacy_ok=0
+  api_ok=0; billing_ok=0; auth_ok=0; legacy_ok=0; workflows_ok=0; executor_ok=0
   if curl --fail --silent --show-error "https://${SESSIONS_DOMAIN}/ready" >/dev/null; then api_ok=1; fi
   billing_code="$(curl -s -o /dev/null -w '%{http_code}' "https://${SESSIONS_DOMAIN}/api/billing/subscription" || true)"
   auth_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{}' "https://${SESSIONS_DOMAIN}/api/auth/login" || true)"
   legacy_code="$("${compose[@]}" exec -T repositories sh -c 'wget -q -O - http://127.0.0.1:4300/health >/dev/null && printf 200' 2>/dev/null || true)"
+  workflows_code="$("${compose[@]}" exec -T workflows sh -c 'wget -q -O - http://127.0.0.1:4400/health >/dev/null && printf 200' 2>/dev/null || true)"
+  if "${compose[@]}" ps --status running executor | grep -q executor; then executor_ok=1; fi
   if [[ "$billing_code" == 401 || "$billing_code" == 403 || "$billing_code" == 200 ]]; then billing_ok=1; fi
   if [[ "$auth_code" == 400 || "$auth_code" == 401 || "$auth_code" == 422 ]]; then auth_ok=1; fi
   if [[ "$legacy_code" == 200 ]]; then legacy_ok=1; fi
-  if [[ "$api_ok" == 1 && "$billing_ok" == 1 && "$auth_ok" == 1 && "$legacy_ok" == 1 ]]; then
+  if [[ "$workflows_code" == 200 ]]; then workflows_ok=1; fi
+  if [[ "$api_ok" == 1 && "$billing_ok" == 1 && "$auth_ok" == 1 && "$legacy_ok" == 1 && "$workflows_ok" == 1 && "$executor_ok" == 1 ]]; then
     printf '%s\n' "$release_id" > .sessions-last-good-release
     echo "[sessions] deployment healthy: $release_id"
     exit 0
