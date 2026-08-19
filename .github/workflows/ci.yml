@@ -69,6 +69,49 @@ jobs:
       - name: Qualify migrations, persistence, backup and restore
         run: bash scripts/qualify-postgres.sh
 
+  native-actions-qualification:
+    name: Sessions-native Actions / pull request qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: sessions, POSTGRES_PASSWORD: sessions, POSTGRES_DB: sessions }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      TEST_DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply complete production schema
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/init.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/002-hosted-repositories.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/003-source-storage.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/004-production-controls.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/005-commercial-operations.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/006-product-analytics.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/007-billing-integrations.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/008-repository-collaboration.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/009-lifecycle-evidence-events.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/010-hosted-auth.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/011-repository-onboarding.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/012-sessions-native-repository.sql
+      - name: Qualify native Actions evidence and PR verification
+        run: pnpm --filter @sessions/runner exec tsx --test src/actions.test.ts
+
   lifecycle-recovery-qualification:
     name: lifecycle / recovery end-to-end qualification
     runs-on: ubuntu-latest
