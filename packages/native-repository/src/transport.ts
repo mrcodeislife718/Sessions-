@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { checkoutWorkstream, createCheckpoint, createWorkstream, getActiveWorkstream, getCheckpoint, getSourceManifest, initializeRepository, listHistory, listWorkstreams, openRepository, repositoryStatus, restoreCheckpoint, stagePaths } from "./core.js";
+import { checkoutWorkstream, createCheckpoint, createWorkstream, digest, getActiveWorkstream, getCheckpoint, getSourceManifest, initializeRepository, listHistory, listWorkstreams, openRepository, repositoryStatus, restoreCheckpoint, stagePaths } from "./core.js";
 
 const execFileAsync = promisify(execFile);
 type Remote={name:string;url:string;fetch?:string;push?:string};
@@ -26,12 +26,14 @@ export async function removeRemote(root:string,name:string){const c=await config
 async function remote(root:string,name:string){const r=(await listRemotes(root)).find(x=>x.name===name);if(!r)throw new Error(`Unknown remote: ${name}`);return r}
 function isHosted(url:string){return /^https?:\/\//.test(url)}
 function hostedToken(){const token=process.env.SESSIONS_API_TOKEN?.trim();if(!token)throw new Error("SESSIONS_API_TOKEN is required for hosted Sessions transport");return token}
+function repositoryCollection(url:string){const clean=url.replace(/\/$/,"");if(/\/api\/repositories$/.test(clean))return clean;if(/\/api\/repositories\/[^/]+$/.test(clean))return clean.replace(/\/[^/]+$/,"");return `${clean}/api/repositories`}
+function repositoryEndpoint(url:string,repositoryId:string){const clean=url.replace(/\/$/,"");if(/\/api\/repositories\/[^/]+$/.test(clean))return clean;return `${repositoryCollection(clean)}/${encodeURIComponent(repositoryId)}`}
 async function hostedRequest(url:string,init:RequestInit={}){const headers=new Headers(init.headers);headers.set("authorization",`Bearer ${hostedToken()}`);if(!headers.has("content-type"))headers.set("content-type","application/json");const response=await fetch(url,{...init,headers});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.error??`Sessions remote HTTP ${response.status}`);return body}
 export async function createNativeBundle(root:string):Promise<NativeBundle>{
   const repository=await openRepository(root);const state=await readJson<any>(stateFile(root));const branches=await listWorkstreams(root);const checkpoints=await listHistory(root);const tags=await listTags(root);
   const manifestIds=[...new Set(checkpoints.map(c=>c.sourceManifestId))];const manifests=await Promise.all(manifestIds.map(id=>getSourceManifest(root,id)));
   const objectEntries=new Map<string,{objectId:string;digest:string;size:number}>();for(const manifest of manifests)for(const entry of manifest.entries)objectEntries.set(entry.objectId,{objectId:entry.objectId,digest:entry.digest,size:entry.size});
-  const objects=[] as NativeBundle["objects"];for(const object of objectEntries.values()){const content=await readFile(objectFile(root,object.objectId));objects.push({...object,contentBase64:content.toString("base64")});}
+  const objects=[] as NativeBundle["objects"];for(const object of objectEntries.values()){const content=await readFile(objectFile(root,object.objectId));if(digest(content)!==object.digest)throw new Error(`Sessions object integrity failed before push: ${object.objectId}`);objects.push({...object,contentBase64:content.toString("base64")});}
   const refs=[...branches.map(b=>({refType:"branch",name:b.name,checkpointId:b.headCheckpointId??null,metadata:{id:b.id,objective:b.objective,createdAt:b.createdAt,updatedAt:b.updatedAt}})),...tags.map(t=>({refType:"tag",name:t.name,checkpointId:t.checkpointId,metadata:{message:t.message,createdAt:t.createdAt}}))];
   return{version:1,protocol:"sessions-native",repository,state:{repository,state,branches,tags},refs,checkpoints,manifests,objects,sourceDigest:checkpoints[0]?.sourceDigest};
 }
@@ -43,29 +45,29 @@ async function applyNativeBundle(root:string,bundle:NativeBundle){
   for(const tag of bundle.state?.tags??[])await writeJson(join(tagDir(root),`${encodeURIComponent(tag.name)}.json`),tag);
   for(const checkpoint of bundle.checkpoints??[])await writeJson(join(checkpointDir(root),`${checkpoint.id}.json`),checkpoint);
   for(const manifest of bundle.manifests??[])await writeJson(join(manifestDir(root),`${manifest.id}.json`),manifest);
-  for(const object of bundle.objects??[]){const content=Buffer.from(object.contentBase64,"base64");if(content.byteLength!==Number(object.size))throw new Error(`Sessions object size mismatch: ${object.objectId}`);const path=objectFile(root,object.objectId);await mkdir(dirname(path),{recursive:true});await writeFile(path,content);}
+  for(const object of bundle.objects??[]){const content=Buffer.from(object.contentBase64,"base64");if(content.byteLength!==Number(object.size)||digest(content)!==object.digest)throw new Error(`Sessions object integrity failed during transfer: ${object.objectId}`);const path=objectFile(root,object.objectId);await mkdir(dirname(path),{recursive:true});await writeFile(path,content);}
   await materializeHead(root);
 }
 async function materializeHead(root:string){const active=await getActiveWorkstream(root);if(active.headCheckpointId)await restoreCheckpoint(root,active.headCheckpointId)}
 export async function cloneRepository(source:string,destination:string){
   const dest=resolve(destination);await mkdir(dest,{recursive:true});
-  if(isHosted(source)){const endpoint=source.replace(/\/$/,"");const bundle=await hostedRequest(`${endpoint}/bundle`) as NativeBundle;await applyNativeBundle(dest,bundle);return openRepository(dest);}
+  if(isHosted(source)){const match=source.replace(/\/$/,"").match(/\/api\/repositories\/([^/]+)$/);if(!match)throw new Error("Hosted clone URL must identify a Sessions repository, e.g. https://host/api/repositories/repo_id");const bundle=await hostedRequest(`${repositoryEndpoint(source,decodeURIComponent(match[1]))}/bundle`) as NativeBundle;await applyNativeBundle(dest,bundle);return openRepository(dest);}
   const src=resolve(source);await cp(join(src,".sessions"),join(dest,".sessions"),{recursive:true,force:true});await materializeHead(dest);return openRepository(dest);
 }
 export async function fetchRemote(root:string,name="origin"){
-  const r=await remote(root,name);const url=r.fetch??r.url;
-  if(isHosted(url)){const bundle=await hostedRequest(`${url}/bundle`) as NativeBundle;const incoming=join(internal(root),"remotes",name,"bundle.json");await writeJson(incoming,bundle);return{remote:name,fetchedAt:new Date().toISOString(),path:incoming,protocol:"sessions-native"};}
+  const r=await remote(root,name);const url=r.fetch??r.url;const repository=await openRepository(root);
+  if(isHosted(url)){const endpoint=repositoryEndpoint(url,repository.id);const bundle=await hostedRequest(`${endpoint}/bundle`) as NativeBundle;const incoming=join(internal(root),"remotes",name,"bundle.json");await writeJson(incoming,bundle);return{remote:name,fetchedAt:new Date().toISOString(),path:incoming,protocol:"sessions-native"};}
   const source=resolve(url),incoming=join(internal(root),"remotes",name);await rm(incoming,{recursive:true,force:true});await cp(join(source,".sessions"),incoming,{recursive:true,force:true});return{remote:name,fetchedAt:new Date().toISOString(),path:incoming,protocol:"sessions-native-local"};
 }
 export async function pushRemote(root:string,name="origin"){
   const r=await remote(root,name);const url=r.push??r.url;
-  if(isHosted(url)){const bundle=await createNativeBundle(root);await hostedRequest(url,{method:"POST",body:JSON.stringify({id:bundle.repository.id,name:bundle.repository.name,defaultBranchId:bundle.repository.defaultWorkstreamId,sourceDigest:bundle.sourceDigest})});await hostedRequest(`${url}/${url.endsWith(bundle.repository.id)?"bundle":`${bundle.repository.id}/bundle`}`.replace(/\/+/g,"/").replace("https:/","https://").replace("http:/","http://"),{method:"POST",body:JSON.stringify(bundle)});return{remote:name,pushedAt:new Date().toISOString(),protocol:"sessions-native"};}
+  if(isHosted(url)){const bundle=await createNativeBundle(root);const collection=repositoryCollection(url),endpoint=repositoryEndpoint(url,bundle.repository.id);await hostedRequest(collection,{method:"POST",body:JSON.stringify({id:bundle.repository.id,name:bundle.repository.name,defaultBranchId:bundle.repository.defaultWorkstreamId,sourceDigest:bundle.sourceDigest})});await hostedRequest(`${endpoint}/bundle`,{method:"POST",body:JSON.stringify(bundle)});return{remote:name,pushedAt:new Date().toISOString(),protocol:"sessions-native"};}
   const destination=resolve(url);await mkdir(destination,{recursive:true});await cp(join(root,".sessions"),join(destination,".sessions"),{recursive:true,force:true});return{remote:name,pushedAt:new Date().toISOString(),protocol:"sessions-native-local"};
 }
 export async function pullRemote(root:string,name="origin"){
-  const r=await remote(root,name),status=await repositoryStatus(root);if(!status.clean)throw new Error("Cannot pull with local staged or unstaged changes");const savedRemotes=await config(root),url=r.fetch??r.url;
-  if(isHosted(url)){const bundle=await hostedRequest(`${url}/bundle`) as NativeBundle;const local=await openRepository(root);if(local.id!==bundle.repository.id)throw new Error("Remote repository identity does not match local Sessions repository");await applyNativeBundle(root,bundle);await writeJson(remoteFile(root),savedRemotes);return{remote:name,pulledAt:new Date().toISOString(),headCheckpointId:(await getActiveWorkstream(root)).headCheckpointId,protocol:"sessions-native"};}
-  const source=resolve(url),local=await openRepository(root),upstream=await openRepository(source);if(local.id!==upstream.id)throw new Error("Remote repository identity does not match local Sessions repository");await cp(join(source,".sessions"),join(root,".sessions"),{recursive:true,force:true});await writeJson(remoteFile(root),savedRemotes);await materializeHead(root);return{remote:name,pulledAt:new Date().toISOString(),headCheckpointId:(await getActiveWorkstream(root)).headCheckpointId,protocol:"sessions-native-local"};
+  const r=await remote(root,name),status=await repositoryStatus(root);if(!status.clean)throw new Error("Cannot pull with local staged or unstaged changes");const savedRemotes=await config(root),url=r.fetch??r.url,local=await openRepository(root);
+  if(isHosted(url)){const endpoint=repositoryEndpoint(url,local.id),bundle=await hostedRequest(`${endpoint}/bundle`) as NativeBundle;if(local.id!==bundle.repository.id)throw new Error("Remote repository identity does not match local Sessions repository");await applyNativeBundle(root,bundle);await writeJson(remoteFile(root),savedRemotes);return{remote:name,pulledAt:new Date().toISOString(),headCheckpointId:(await getActiveWorkstream(root)).headCheckpointId,protocol:"sessions-native"};}
+  const source=resolve(url),upstream=await openRepository(source);if(local.id!==upstream.id)throw new Error("Remote repository identity does not match local Sessions repository");await cp(join(source,".sessions"),join(root,".sessions"),{recursive:true,force:true});await writeJson(remoteFile(root),savedRemotes);await materializeHead(root);return{remote:name,pulledAt:new Date().toISOString(),headCheckpointId:(await getActiveWorkstream(root)).headCheckpointId,protocol:"sessions-native-local"};
 }
 export async function createTag(root:string,name:string,checkpointRef?:string,message?:string){const active=await getActiveWorkstream(root);const checkpoint=checkpointRef?await getCheckpoint(root,checkpointRef):active.headCheckpointId?await getCheckpoint(root,active.headCheckpointId):undefined;if(!checkpoint)throw new Error("Cannot tag repository without a checkpoint");const p=join(tagDir(root),`${encodeURIComponent(name)}.json`);try{await stat(p);throw new Error(`Tag already exists: ${name}`)}catch(e:any){if(e?.code!=="ENOENT")throw e}const tag:Tag={version:1,name,checkpointId:checkpoint.id,message,createdAt:new Date().toISOString()};await writeJson(p,tag);return tag}
 export async function listTags(root:string):Promise<Tag[]>{try{return await Promise.all((await readdir(tagDir(root))).filter(x=>x.endsWith(".json")).map(x=>readJson<Tag>(join(tagDir(root),x))))}catch{return[]}}
