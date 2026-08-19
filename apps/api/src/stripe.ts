@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type StripeEvent = { id: string; type: string; livemode?: boolean; data: { object: any } };
+export type StripeEvent = { id: string; type: string; created?: number; livemode?: boolean; data: { object: any } };
 
 export function verifyStripeSignature(payload: Buffer, header: string, secret: string, toleranceSeconds = 300, nowSeconds = Math.floor(Date.now() / 1000)): StripeEvent {
   const parts = header.split(",").map((part) => part.trim());
