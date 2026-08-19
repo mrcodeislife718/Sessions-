@@ -41,6 +41,16 @@ async function request(path: string, init?: RequestInit) {
   return body as any;
 }
 
+async function verifyHostedConnection(apiUrl: string, token: string) {
+  const response = await fetch(`${apiUrl.replace(/\/$/, "")}/ready`, {
+    headers: { authorization: `Bearer ${token.trim()}` },
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  const body = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) throw new Error(typeof body === "object" && body && "error" in body ? String((body as any).error) : `HTTP ${response.status}`);
+  return body as any;
+}
+
 function command(context: vscode.ExtensionContext, id: string, handler: () => Promise<void>) {
   context.subscriptions.push(vscode.commands.registerCommand(id, async () => {
     try { await handler(); }
@@ -69,11 +79,11 @@ export function activate(context: vscode.ExtensionContext) {
     if (!apiUrl || !/^https?:\/\//.test(apiUrl)) return;
     const token = await vscode.window.showInputBox({ prompt: "Workspace-scoped Sessions token", password: true, ignoreFocusOut: true });
     if (!token) return;
+    await verifyHostedConnection(apiUrl, token);
     await vscode.workspace.getConfiguration("sessions").update("apiUrl", apiUrl.replace(/\/$/, ""), vscode.ConfigurationTarget.Global);
     await context.secrets.store("sessions.apiToken", token.trim());
-    const ready = await request("/ready");
     provider.refresh();
-    vscode.window.showInformationMessage(`Sessions connected to ${apiUrl}${ready?.database ? ` (${ready.database})` : ""}`);
+    vscode.window.showInformationMessage(`Sessions connected to ${apiUrl}; workspace token verified.`);
   });
 
   command(context, "sessions.disconnectHosted", async () => {
