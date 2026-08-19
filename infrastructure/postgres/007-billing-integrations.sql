@@ -2,9 +2,11 @@ create table if not exists stripe_events (
   id text primary key,
   event_type text not null,
   livemode boolean not null default false,
+  event_created_at timestamptz,
   payload jsonb not null,
   processed_at timestamptz not null default now()
 );
+alter table stripe_events add column if not exists event_created_at timestamptz;
 
 create table if not exists workspace_entitlements (
   workspace_id text primary key references workspaces(id) on delete cascade,
@@ -13,13 +15,17 @@ create table if not exists workspace_entitlements (
   source text not null default 'internal',
   reason text,
   effective_at timestamptz not null default now(),
+  source_event_created_at timestamptz,
   updated_at timestamptz not null default now()
 );
+alter table workspace_entitlements add column if not exists source_event_created_at timestamptz;
 
 alter table billing_accounts add column if not exists external_provider text;
 alter table billing_accounts add column if not exists payment_state text not null default 'ok';
+alter table billing_accounts add column if not exists last_stripe_event_created_at timestamptz;
 alter table subscriptions add column if not exists cancel_at_period_end boolean not null default false;
 alter table subscriptions add column if not exists canceled_at timestamptz;
+alter table subscriptions add column if not exists last_stripe_event_created_at timestamptz;
 create unique index if not exists idx_subscriptions_external_ref on subscriptions(external_subscription_ref) where external_subscription_ref is not null;
 
 create or replace function sessions_assert_workspace_entitled(target_workspace text)
