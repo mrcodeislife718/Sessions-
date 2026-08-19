@@ -3,7 +3,6 @@ import type { Pool, PoolClient } from "pg";
 
 export type ActionResult={processed:boolean;runId?:string;repositoryId?:string;commitId?:string;conclusion?:"success"|"failure"};
 function hash(content:Buffer){return createHash("sha256").update(content).digest("hex");}
-
 type CheckOutcome={conclusion:"success"|"failure";summary:string;evidence:Record<string,unknown>};
 
 async function sourceIntegrity(client:PoolClient,repositoryId:string,commitId:string):Promise<CheckOutcome>{
@@ -39,9 +38,7 @@ async function recoveryReadiness(client:PoolClient,repositoryId:string,commitId:
   const recovery=checkpoint.recovery??{};
   const manifestExists=Boolean((await client.query("select 1 from repository_manifests where repository_id=$1 and id=$2",[repositoryId,checkpoint.sourceManifestId])).rowCount);
   const ready=Boolean(recovery.reconstructable)&&manifestExists;
-  return ready
-    ?{conclusion:"success",summary:"Commit is reconstructable from durable Sessions objects and manifest.",evidence:{commitId,sourceManifestId:checkpoint.sourceManifestId,recovery}}
-    :{conclusion:"failure",summary:"Commit is not yet reconstructable from durable Sessions state.",evidence:{commitId,sourceManifestId:checkpoint.sourceManifestId,recovery,manifestExists}};
+  return ready?{conclusion:"success",summary:"Commit is reconstructable from durable Sessions objects and manifest.",evidence:{commitId,sourceManifestId:checkpoint.sourceManifestId,recovery}}:{conclusion:"failure",summary:"Commit is not yet reconstructable from durable Sessions state.",evidence:{commitId,sourceManifestId:checkpoint.sourceManifestId,recovery,manifestExists}};
 }
 
 async function executeCheck(client:PoolClient,name:string,repositoryId:string,commitId:string):Promise<CheckOutcome>{
@@ -55,10 +52,10 @@ export async function runActionOnce(pool:Pool):Promise<ActionResult>{
   const client=await pool.connect();
   try{
     await client.query("begin");
-    const selected=await client.query(`select * from action_runs where status='queued' and trigger in ('sessions.push','commit') order by created_at for update skip locked limit 1`);
+    const selected=await client.query(`select * from action_runs where status='queued' and trigger in ('sessions.push','commit','pull_request') order by created_at for update skip locked limit 1`);
     if(!selected.rowCount){await client.query("commit");return{processed:false};}
     const run=selected.rows[0];
-    if(!run.commit_id){await client.query("update action_runs set status='completed',conclusion='failure',started_at=now(),completed_at=now() where id=$1",[run.id]);await client.query("commit");return{processed:true,runId:run.id,repositoryId:run.repository_id,conclusion:"failure"};}
+    if(!run.commit_id){await client.query("update action_runs set status='completed',conclusion='failure',started_at=now(),completed_at=now() where id=$1",[run.id]);if(run.pull_request_id)await client.query("update pull_requests set verification_state='failed',mergeable=false,updated_at=now() where id=$1",[run.pull_request_id]);await client.query("commit");return{processed:true,runId:run.id,repositoryId:run.repository_id,conclusion:"failure"};}
     await client.query("update action_runs set status='running',started_at=now() where id=$1",[run.id]);
     const checks=await client.query("select * from action_checks where action_run_id=$1 order by name",[run.id]);
     let failed=false;
@@ -70,6 +67,7 @@ export async function runActionOnce(pool:Pool):Promise<ActionResult>{
     }
     const conclusion=failed?"failure":"success";
     await client.query("update action_runs set status='completed',conclusion=$2,completed_at=now() where id=$1",[run.id,conclusion]);
+    if(run.pull_request_id)await client.query("update pull_requests set verification_state=$2,mergeable=$3,updated_at=now() where id=$1",[run.pull_request_id,failed?"failed":"passed",!failed]);
     await client.query("commit");
     return{processed:true,runId:run.id,repositoryId:run.repository_id,commitId:run.commit_id,conclusion};
   }catch(error){await client.query("rollback");throw error;}finally{client.release();}
