@@ -24,4 +24,21 @@ grep -q 'read_only: true' "$rendered"
 grep -q 'no-new-privileges:true' "$rendered"
 grep -q 'internal: true' "$rendered"
 
-echo 'Production Compose configuration validated.'
+for script in \
+  scripts/backup-production.sh \
+  scripts/restore-production.sh \
+  scripts/deploy-production.sh \
+  scripts/rollback-production.sh \
+  scripts/check-production-slo.sh \
+  scripts/provision-workspace.sh; do
+  test -s "$script"
+  bash -n "$script"
+done
+
+grep -q 'backup-production.sh' scripts/deploy-production.sh
+grep -q 'validate-production-config.sh' scripts/deploy-production.sh
+grep -q 'https://${SESSIONS_DOMAIN}/ready' scripts/deploy-production.sh
+grep -q 'ROLLBACK_REF' scripts/rollback-production.sh
+grep -q 'SESSIONS_SLO_READY_MS' scripts/check-production-slo.sh
+
+echo 'Production Compose and operational deployment configuration validated.'
