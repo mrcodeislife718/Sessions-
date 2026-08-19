@@ -1,0 +1,105 @@
+name: native collaboration
+
+on:
+  push:
+    branches:
+      - main
+      - launch/sessions-production
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native-collaboration:
+    name: native push / Actions / PR / merge / refs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sessions
+          POSTGRES_PASSWORD: sessions
+          POSTGRES_DB: sessions
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+      SESSIONS_ALLOW_INSECURE_LOCAL: "true"
+      SESSIONS_CORS_ORIGIN: http://localhost:3000
+      SESSIONS_API_QUALIFICATION_URL: http://127.0.0.1:4000
+      PORT: "4000"
+      RUNNER_POLL_MS: "100"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply complete production schema
+        run: |
+          for migration in \
+            infrastructure/postgres/init.sql \
+            infrastructure/postgres/002-hosted-repositories.sql \
+            infrastructure/postgres/003-source-storage.sql \
+            infrastructure/postgres/004-production-controls.sql \
+            infrastructure/postgres/005-commercial-operations.sql \
+            infrastructure/postgres/006-product-analytics.sql \
+            infrastructure/postgres/007-billing-integrations.sql \
+            infrastructure/postgres/008-repository-collaboration.sql \
+            infrastructure/postgres/009-lifecycle-evidence-events.sql \
+            infrastructure/postgres/010-hosted-auth.sql \
+            infrastructure/postgres/011-repository-onboarding.sql \
+            infrastructure/postgres/012-sessions-native-repository.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Seed native local workspace
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          insert into organizations(id,name) values('org_local','Native Qualification') on conflict(id) do nothing;
+          insert into workspaces(id,organization_id,name) values('workspace_local','org_local','Native Workspace') on conflict(id) do nothing;
+          insert into principals(id,kind,display_name) values('human_local','human','Native Qualification User') on conflict(id) do nothing;
+          insert into workspace_memberships(workspace_id,principal_id,role) values('workspace_local','human_local','owner') on conflict do nothing;
+          insert into workspace_entitlements(workspace_id,plan_key,status,source) values('workspace_local','enterprise','active','qualification') on conflict(workspace_id) do update set status='active',plan_key='enterprise',source='qualification',updated_at=now();
+          insert into workspace_limits(workspace_id,hosted_repository_limit,runner_seconds_monthly_limit,storage_bytes_limit,retained_event_bytes_limit) values('workspace_local',100,100000,1073741824,1073741824) on conflict(workspace_id) do update set hosted_repository_limit=100,storage_bytes_limit=1073741824,updated_at=now();
+          SQL
+      - name: Build API and runner
+        run: |
+          pnpm exec tsc -b packages/shared packages/codevault-core
+          pnpm --filter @sessions/api build
+          pnpm --filter @sessions/runner build
+      - name: Start Sessions API and runner
+        run: |
+          node apps/api/dist/index.js > /tmp/sessions-native-api.log 2>&1 & echo $! > /tmp/sessions-native-api.pid
+          node apps/runner/dist/index.js > /tmp/sessions-native-runner.log 2>&1 & echo $! > /tmp/sessions-native-runner.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4000/ready >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/sessions-native-api.log || true
+          cat /tmp/sessions-native-runner.log || true
+          exit 1
+      - name: Prove native collaboration lifecycle
+        run: node scripts/qualify-native-collaboration.mjs
+      - name: Capture Sessions logs
+        if: always()
+        run: |
+          echo '--- API ---'
+          cat /tmp/sessions-native-api.log || true
+          echo '--- RUNNER ---'
+          cat /tmp/sessions-native-runner.log || true
+      - name: Stop Sessions services
+        if: always()
+        run: |
+          test ! -f /tmp/sessions-native-api.pid || kill "$(cat /tmp/sessions-native-api.pid)" || true
+          test ! -f /tmp/sessions-native-runner.pid || kill "$(cat /tmp/sessions-native-runner.pid)" || true
