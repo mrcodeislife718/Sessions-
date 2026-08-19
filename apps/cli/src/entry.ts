@@ -12,14 +12,18 @@ Source control
   sessions unstage <path...|.>
   sessions staged
   sessions diff [--staged|--unstaged]
-  sessions checkpoint <name>
-  sessions history
-  sessions work <objective>
-  sessions workstream list
-  sessions workstream create <name> [objective]
+  sessions commit <message>
+  sessions log
+  sessions branch [name]
   sessions switch <name-or-id>
-  sessions integrate <workstream> [--apply]
-  sessions restore <checkpoint> [--apply]
+  sessions remote <list|add|set|remove>
+  sessions push [remote]
+  sessions fetch [remote]
+  sessions pull [remote]
+  sessions clone <Sessions-repository-URL> <destination>
+  sessions tag <list|create|delete>
+  sessions revert <commit>
+  sessions restore <commit> [--apply]
   sessions integrity
 
 Execution + intelligence
@@ -28,15 +32,25 @@ Execution + intelligence
   sessions verify <kind> <passed|failed|requires_review> <summary>
   sessions timeline
   sessions replay
-  sessions recovery <checkpoint-id>
+  sessions recovery <commit-id>
 
-Hosted
-  sessions connect <https://host> [token]
-  sessions disconnect
+Hosted Sessions
+  sessions login <https://host> <email>
+  sessions logout
   sessions billing
   sessions upgrade [developer|team|business|enterprise]
   sessions export [file]
   sessions cancel
+
+Legacy migration only
+  sessions import [legacy-git-repository] [destination]
+
+Compatibility
+  sessions connect <https://host> [token]
+  sessions disconnect
+  workstream = branch
+  checkpoint = commit
+  history = log
 `;
 
 const [, , command, ...args] = process.argv;
