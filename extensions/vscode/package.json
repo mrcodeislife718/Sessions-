@@ -14,12 +14,15 @@
         "sessions.apiUrl": {
           "type": "string",
           "default": "http://localhost:4000",
-          "description": "Sessions control-plane API URL"
+          "description": "Sessions control-plane API URL. Hosted tokens are stored separately in VS Code SecretStorage."
         }
       }
     },
     "commands": [
       { "command": "sessions.refresh", "title": "Sessions: Refresh" },
+      { "command": "sessions.connectHosted", "title": "Sessions: Connect to Hosted Sessions" },
+      { "command": "sessions.disconnectHosted", "title": "Sessions: Disconnect Hosted Sessions" },
+      { "command": "sessions.billing", "title": "Sessions: Show Billing & Entitlement Status" },
       { "command": "sessions.start", "title": "Sessions: Start Session" },
       { "command": "sessions.stageAll", "title": "Sessions: Stage All Changes" },
       { "command": "sessions.unstageAll", "title": "Sessions: Unstage All Changes" },
