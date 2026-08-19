@@ -20,6 +20,8 @@ services:
         condition: service_healthy
       auth:
         condition: service_healthy
+      repositories:
+        condition: service_healthy
     networks:
       - edge
       - control
@@ -138,6 +140,40 @@ services:
       retries: 5
       start_period: 15s
 
+  repositories:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.repositories
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      REPOSITORY_PORT: 4300
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB required}
+      SESSIONS_MAX_BODY_BYTES: ${SESSIONS_MAX_BODY_BYTES:-1048576}
+      SESSIONS_REPOSITORY_DB_POOL_MAX: ${SESSIONS_REPOSITORY_DB_POOL_MAX:-10}
+    expose:
+      - "4300"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - control
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4300/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   billing:
     build:
       context: .
@@ -228,6 +264,7 @@ services:
       - ./infrastructure/postgres/010-hosted-auth.sql:/docker-entrypoint-initdb.d/010-hosted-auth.sql:ro
       - ./infrastructure/postgres/011-repository-onboarding.sql:/docker-entrypoint-initdb.d/011-repository-onboarding.sql:ro
       - ./infrastructure/postgres/012-sessions-native-repository.sql:/docker-entrypoint-initdb.d/012-sessions-native-repository.sql:ro
+      - ./infrastructure/postgres/013-team-invitations.sql:/docker-entrypoint-initdb.d/013-team-invitations.sql:ro
     networks:
       - data
     healthcheck:
