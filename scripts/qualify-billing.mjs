@@ -74,23 +74,31 @@ try {
   const checkoutEvent = {
     id: "evt_checkout_qualification",
     type: "checkout.session.completed",
+    created: 1_800_000_100,
     livemode: false,
     data: { object: { id: "cs_qualification", status: "complete", customer: "cus_qualification", subscription: "sub_qualification", metadata: { workspace_id: "workspace_billing_qualification", plan_key: "developer" } } },
   };
   assert((await webhook(checkoutEvent)).result === "processed", "checkout webhook not processed");
   assert((await webhook(checkoutEvent)).result === "duplicate", "duplicate Stripe event was not deduplicated");
 
-  await webhook({ id: "evt_failed_qualification", type: "invoice.payment_failed", livemode: false, data: { object: { id: "in_failed", customer: "cus_qualification", subscription: "sub_qualification" } } });
+  await webhook({ id: "evt_failed_qualification", type: "invoice.payment_failed", created: 1_800_000_300, livemode: false, data: { object: { id: "in_failed", customer: "cus_qualification", subscription: "sub_qualification" } } });
   assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "payment_failed", "payment failure did not suspend writes");
   psql("insert into sessions(id,workspace_id,project_id,repository_id,objective) values('session_should_fail','workspace_billing_qualification','project_billing','repo_billing_qualification','must be blocked')", false);
 
-  await webhook({ id: "evt_paid_qualification", type: "invoice.paid", livemode: false, data: { object: { id: "in_paid", customer: "cus_qualification", subscription: "sub_qualification" } } });
-  assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "active", "successful payment did not restore entitlement");
+  await webhook({ id: "evt_stale_paid_qualification", type: "invoice.paid", created: 1_800_000_200, livemode: false, data: { object: { id: "in_stale_paid", status: "paid", customer: "cus_qualification", subscription: "sub_qualification" } } });
+  assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "payment_failed", "older out-of-order paid event incorrectly restored entitlement");
+  psql("insert into sessions(id,workspace_id,project_id,repository_id,objective) values('session_still_blocked','workspace_billing_qualification','project_billing','repo_billing_qualification','must remain blocked')", false);
+
+  await webhook({ id: "evt_paid_qualification", type: "invoice.paid", created: 1_800_000_400, livemode: false, data: { object: { id: "in_paid", status: "paid", customer: "cus_qualification", subscription: "sub_qualification" } } });
+  assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "active", "newer successful payment did not restore entitlement");
   psql("insert into sessions(id,workspace_id,project_id,repository_id,objective) values('session_after_recovery','workspace_billing_qualification','project_billing','repo_billing_qualification','writes restored') on conflict(id) do nothing");
 
   const exported = await api("/api/account/export", { method: "POST", body: "{}" });
+  assert(exported.body.schemaVersion === 2, "export schema version was not advanced");
   assert(exported.body.workspace?.id === "workspace_billing_qualification", "export did not contain workspace data");
   assert(exported.body.sessions?.some((session) => session.id === "session_after_recovery"), "export did not include Sessions data");
+  assert(Array.isArray(exported.body.snapshots) && Array.isArray(exported.body.verifications), "export did not include recovery and verification collections");
+  assert(Array.isArray(exported.body.billingAccounts) && Array.isArray(exported.body.entitlements), "export did not include account and entitlement state");
   assert((exported.response.headers.get("content-disposition") ?? "").includes("attachment"), "export is not downloadable");
 
   const cancellation = await api("/api/account/cancel", { method: "POST", body: "{}" });
@@ -103,11 +111,11 @@ try {
   assert(billing.body.external_subscription_ref === "sub_qualification", "Stripe subscription was not reconciled");
   assert(billing.body.entitlement_status === "active", "billing status does not expose active entitlement");
 
-  assert(psql("select count(*) from stripe_events") === "3", "Stripe event ledger count is incorrect");
+  assert(psql("select count(*) from stripe_events") === "4", "Stripe event ledger count is incorrect");
   assert(psql("select count(*) from cancellation_records where billing_account_id='billing_billing_qualification'") === "1", "cancellation record missing");
   assert(psql("select status from data_export_requests where workspace_id='workspace_billing_qualification' order by requested_at desc limit 1") === "ready", "export request did not reach ready state");
 
-  console.log(JSON.stringify({ qualification: "billing-control-plane", passed: true, stripeEvents: 3, entitlementRecovery: true, export: true, cancellation: true }, null, 2));
+  console.log(JSON.stringify({ qualification: "billing-control-plane", passed: true, stripeEvents: 4, duplicateSafety: true, outOfOrderSafety: true, entitlementRecovery: true, export: true, cancellation: true }, null, 2));
 } finally {
   await new Promise((resolve) => stripeMock.close(resolve));
 }
