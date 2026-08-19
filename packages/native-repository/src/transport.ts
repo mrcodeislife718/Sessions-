@@ -38,7 +38,9 @@ export async function createNativeBundle(root:string):Promise<NativeBundle>{
   const objectEntries=new Map<string,{objectId:string;digest:string;size:number}>();for(const manifest of manifests)for(const entry of manifest.entries)objectEntries.set(entry.objectId,{objectId:entry.objectId,digest:entry.digest,size:entry.size});
   const objects:NativeObject[]=[];for(const object of objectEntries.values()){const content=await readFile(objectFile(root,object.objectId));if(digest(content)!==object.digest)throw new Error(`Sessions object integrity failed before push: ${object.objectId}`);objects.push({...object,contentBase64:content.toString("base64")});}
   const refs=[...branches.map(b=>({refType:"branch",name:b.name,checkpointId:b.headCheckpointId??null,metadata:{id:b.id,objective:b.objective,createdAt:b.createdAt,updatedAt:b.updatedAt}})),...tags.map(t=>({refType:"tag",name:t.name,checkpointId:t.checkpointId,metadata:{message:t.message,createdAt:t.createdAt}}))];
-  return{version:1,protocol:"sessions-native",repository,state:{repository,state,branches,tags},refs,checkpoints,manifests,objects,sourceDigest:checkpoints[0]?.sourceDigest};
+  const defaultBranch=branches.find(branch=>branch.id===repository.defaultWorkstreamId);
+  const defaultCheckpoint=defaultBranch?.headCheckpointId?checkpoints.find(checkpoint=>checkpoint.id===defaultBranch.headCheckpointId):undefined;
+  return{version:1,protocol:"sessions-native",repository,state:{repository,state,branches,tags},refs,checkpoints,manifests,objects,sourceDigest:defaultCheckpoint?.sourceDigest};
 }
 function metadata(bundle:NativeBundle){return{version:1,protocol:"sessions-native",state:bundle.state,refs:bundle.refs,checkpoints:bundle.checkpoints,manifests:bundle.manifests,sourceDigest:bundle.sourceDigest}}
 function synchronizedHostedState(state:NativeState){
