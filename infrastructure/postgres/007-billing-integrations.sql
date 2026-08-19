@@ -54,8 +54,6 @@ begin
 end;
 $$;
 
-foreach_table: begin end;
-
 drop trigger if exists trg_session_events_entitlement on session_events;
 create trigger trg_session_events_entitlement before insert or update on session_events for each row execute function sessions_enforce_child_entitlement();
 drop trigger if exists trg_snapshots_entitlement on snapshots;
