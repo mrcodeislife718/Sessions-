@@ -4,7 +4,7 @@ set -euo pipefail
 : "${DATABASE_URL:?DATABASE_URL is required}"
 : "${WORKSPACE_NAME:?WORKSPACE_NAME is required}"
 : "${PRINCIPAL_NAME:?PRINCIPAL_NAME is required}"
-: "${PLAN_KEY:=developer}"
+: "${PLAN_KEY:=free}"
 : "${PRINCIPAL_KIND:=human}"
 
 case "$PLAN_KEY" in free|developer|team|business|enterprise) ;; *) echo "Invalid PLAN_KEY" >&2; exit 2;; esac
@@ -31,9 +31,12 @@ insert into workspaces (id, organization_id, name) values (:'workspace_id', :'or
 insert into principals (id, kind, display_name) values (:'principal_id', :'principal_kind', :'principal_name');
 insert into workspace_memberships (workspace_id, principal_id, role) values (:'workspace_id', :'principal_id', 'owner');
 insert into api_credentials (id, workspace_id, principal_id, token_hash, scopes)
-values (:'credential_id', :'workspace_id', :'principal_id', :'token_hash', array['sessions:read','sessions:write','sessions:verify','sessions:rollback','metrics:read']);
+values (:'credential_id', :'workspace_id', :'principal_id', :'token_hash', array['sessions:read','sessions:write','sessions:verify','sessions:rollback','metrics:read','billing:read','billing:write','account:export']);
 insert into billing_accounts (id, workspace_id, plan_key, status) values (:'billing_id', :'workspace_id', :'plan_key', 'active');
 insert into subscriptions (id, billing_account_id, plan_key, status, seats) values (:'subscription_id', :'billing_id', :'plan_key', 'active', 1);
+insert into workspace_entitlements (workspace_id, plan_key, status, source)
+values (:'workspace_id', :'plan_key', 'active', 'internal')
+on conflict(workspace_id) do update set plan_key=excluded.plan_key,status='active',source='internal',updated_at=now();
 insert into product_events (id, workspace_id, principal_id, event_name, properties)
 values ('product_' || gen_random_uuid()::text, :'workspace_id', :'principal_id', 'workspace_provisioned', jsonb_build_object('plan', :'plan_key'));
 commit;
@@ -49,4 +52,5 @@ plan=$PLAN_KEY
 SESSIONS_API_TOKEN=$raw_token
 
 The token is shown once. Store it securely; only its SHA-256 digest is persisted.
+For hosted customer onboarding, leave PLAN_KEY=free and use 'sessions upgrade' to begin Stripe Checkout.
 EOF
