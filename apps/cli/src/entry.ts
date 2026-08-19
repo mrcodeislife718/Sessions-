@@ -34,7 +34,7 @@ Hosted
   sessions connect <https://host> [token]
   sessions disconnect
   sessions billing
-  sessions upgrade [developer|team|enterprise]
+  sessions upgrade [developer|team|business|enterprise]
   sessions export [file]
   sessions cancel
 `;
