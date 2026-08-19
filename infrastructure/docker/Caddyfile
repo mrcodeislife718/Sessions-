@@ -1,6 +1,15 @@
 {$SESSIONS_DOMAIN:localhost} {
   encode zstd gzip
 
+  @authenticatedReady {
+    path /ready
+    header Authorization *
+  }
+  handle @authenticatedReady {
+    rewrite * /api/sessions
+    reverse_proxy api:4000
+  }
+
   @billing path /api/billing/* /api/account/* /webhooks/stripe
   handle @billing {
     reverse_proxy billing:4100
