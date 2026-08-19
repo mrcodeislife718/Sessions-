@@ -34,7 +34,7 @@ services:
       api: { condition: service_healthy }
     networks: [control]
     read_only: true
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     healthcheck:
@@ -69,7 +69,7 @@ services:
       redis: { condition: service_healthy }
     networks: [control, data]
     read_only: true
-    tmpfs: [/tmp:size=128m,mode=1777]
+    tmpfs: ["/tmp:size=128m,mode=1777"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     pids_limit: 256
@@ -95,7 +95,7 @@ services:
       postgres: { condition: service_healthy }
     networks: [control, data]
     read_only: true
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     pids_limit: 128
@@ -120,7 +120,7 @@ services:
       postgres: { condition: service_healthy }
     networks: [control, data]
     read_only: true
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     pids_limit: 128
@@ -145,7 +145,7 @@ services:
       postgres: { condition: service_healthy }
     networks: [control, data]
     read_only: true
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     pids_limit: 128
@@ -177,7 +177,7 @@ services:
       postgres: { condition: service_healthy }
     networks: [control, data]
     read_only: true
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     pids_limit: 128
@@ -201,7 +201,7 @@ services:
       redis: { condition: service_healthy }
     networks: [data, runner]
     read_only: true
-    tmpfs: [/tmp:size=256m,mode=1777, /workspace:size=1g,mode=1777]
+    tmpfs: ["/tmp:size=256m,mode=1777", "/workspace:size=1g,mode=1777"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     pids_limit: 256
@@ -227,7 +227,7 @@ services:
       - sessions_jobs:/sessions-jobs
       - /var/run/docker.sock:/var/run/docker.sock
     read_only: true
-    tmpfs: [/tmp:size=128m,mode=1777]
+    tmpfs: ["/tmp:size=128m,mode=1777"]
     security_opt: [no-new-privileges:true]
     pids_limit: 256
 
