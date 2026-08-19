@@ -22,6 +22,11 @@
     reverse_proxy repositories:4300
   }
 
+  @workflowControl path_regexp workflowControl ^/api/repositories/[^/]+/(workflows(?:/.*)?|action-runs/[^/]+)$
+  handle @workflowControl {
+    reverse_proxy workflows:4400
+  }
+
   @billing path /api/billing/* /api/account/* /webhooks/stripe
   handle @billing {
     reverse_proxy billing:4100
