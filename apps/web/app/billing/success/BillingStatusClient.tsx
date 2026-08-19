@@ -12,7 +12,7 @@ export function BillingStatusClient() {
       const token = window.localStorage.getItem("sessions_api_token");
       if (!token) {
         setState("error");
-        setMessage("Checkout returned successfully, but this browser does not have your Sessions workspace token. Reconnect the workspace from onboarding.");
+        setMessage("Checkout returned successfully, but this browser does not have your Sessions account credential. Sign in again from onboarding.");
         return;
       }
       const base = process.env.NEXT_PUBLIC_SESSIONS_BILLING_URL || window.location.origin;
@@ -22,7 +22,7 @@ export function BillingStatusClient() {
           const body = await response.json().catch(() => ({}));
           if (response.ok && body?.entitlement_status === "active") {
             setState("active");
-            setMessage("Payment confirmed. Your Sessions workspace is active.");
+            setMessage("Payment confirmed. Your Sessions workspace is active and ready for its first native repository.");
             return;
           }
           if (!response.ok && response.status !== 404) throw new Error(body.error ?? `HTTP ${response.status}`);
@@ -47,8 +47,8 @@ export function BillingStatusClient() {
       <strong>{state === "active" ? "Workspace activated" : state === "error" ? "Action required" : "Finishing activation"}</strong>
       <p>{message}</p>
       <div className="billing-result-actions">
-        <a className="button sessions-primary" href="/dashboard">Open Sessions</a>
-        <a className="button sessions-secondary" href="/onboarding">Workspace setup</a>
+        <a className="button sessions-primary" href={state === "active" ? "/install" : "/onboarding"}>{state === "active" ? "Install Sessions" : "Return to setup"}</a>
+        <a className="button sessions-secondary" href="/dashboard">Open web workspace</a>
       </div>
     </div>
   );
