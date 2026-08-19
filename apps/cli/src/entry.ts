@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { handleHostedCommand, loadHostedEnvironment } from "./hosted.js";
 import { handleNativeCommand } from "./native.js";
 
 const help = `Sessions
@@ -28,12 +29,24 @@ Execution + intelligence
   sessions timeline
   sessions replay
   sessions recovery <checkpoint-id>
+
+Hosted
+  sessions connect <https://host> [token]
+  sessions disconnect
+  sessions billing
+  sessions upgrade [developer|team|enterprise]
+  sessions export [file]
+  sessions cancel
 `;
 
 const [, , command, ...args] = process.argv;
+await loadHostedEnvironment();
 if (!command || command === "help" || command === "--help" || command === "-h") {
   console.log(help);
 } else {
-  const handled = await handleNativeCommand(command, args, process.cwd());
-  if (!handled) await import("./index.js");
+  const hosted = await handleHostedCommand(command, args);
+  if (!hosted) {
+    const handled = await handleNativeCommand(command, args, process.cwd());
+    if (!handled) await import("./index.js");
+  }
 }
