@@ -26,7 +26,7 @@ export function CheckoutClient() {
     setBusy(true);
     setStatus("Creating secure Stripe Checkout…");
     try {
-      const billingUrl = process.env.NEXT_PUBLIC_SESSIONS_BILLING_URL ?? "http://localhost:4100";
+      const billingUrl = process.env.NEXT_PUBLIC_SESSIONS_BILLING_URL || window.location.origin;
       const response = await fetch(`${billingUrl}/api/billing/checkout`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token.trim()}` },
