@@ -67,7 +67,10 @@ export async function runActionOnce(pool:Pool):Promise<ActionResult>{
     }
     const conclusion=failed?"failure":"success";
     await client.query("update action_runs set status='completed',conclusion=$2,completed_at=now() where id=$1",[run.id,conclusion]);
-    if(run.pull_request_id)await client.query("update pull_requests set verification_state=$2,mergeable=$3,updated_at=now() where id=$1",[run.pull_request_id,failed?"failed":"passed",!failed]);
+    if(run.pull_request_id){
+      if(failed)await client.query("update pull_requests set verification_state='failed',mergeable=false,updated_at=now() where id=$1",[run.pull_request_id]);
+      else await client.query("update pull_requests set verification_state='passed',updated_at=now() where id=$1",[run.pull_request_id]);
+    }
     await client.query("commit");
     return{processed:true,runId:run.id,repositoryId:run.repository_id,commitId:run.commit_id,conclusion};
   }catch(error){await client.query("rollback");throw error;}finally{client.release();}
