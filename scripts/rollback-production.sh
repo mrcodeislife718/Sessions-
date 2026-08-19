@@ -22,11 +22,14 @@ bash scripts/backup-production.sh
 echo "[sessions] checking out qualified rollback ref $ROLLBACK_REF"
 git checkout --detach "$ROLLBACK_REF"
 bash scripts/validate-production-config.sh
-"${compose[@]}" build api web runner
-"${compose[@]}" up -d --no-deps api runner web proxy
+"${compose[@]}" build api billing web runner
+"${compose[@]}" up -d --no-deps api billing runner web proxy
 
 for i in $(seq 1 60); do
-  if curl --fail --silent --show-error "https://${SESSIONS_DOMAIN}/ready" >/dev/null; then
+  api_ok=0
+  if curl --fail --silent --show-error "https://${SESSIONS_DOMAIN}/ready" >/dev/null; then api_ok=1; fi
+  billing_code="$(curl -s -o /dev/null -w '%{http_code}' "https://${SESSIONS_DOMAIN}/api/billing/subscription" || true)"
+  if [[ "$api_ok" == 1 && ( "$billing_code" == 200 || "$billing_code" == 401 || "$billing_code" == 403 ) ]]; then
     printf '%s\n' "$ROLLBACK_REF" > .sessions-last-good-release
     echo "[sessions] rollback healthy: $ROLLBACK_REF"
     exit 0
