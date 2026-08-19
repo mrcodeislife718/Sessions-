@@ -8,7 +8,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 const digest = (content: Buffer) => createHash("sha256").update(content).digest("hex");
 
 test(
-  "runner verifies a Sessions-native pushed commit and persists evidence",
+  "runner verifies a Sessions-native pull request commit and persists evidence",
   { skip: databaseUrl ? false : "TEST_DATABASE_URL is not configured" },
   async () => {
     const pool = new Pool({ connectionString: databaseUrl });
@@ -19,10 +19,10 @@ test(
     const repositoryId = `repo_action_${suffix}`;
     const checkpointId = `checkpoint_action_${suffix}`;
     const manifestId = `manifest_action_${suffix}`;
-    const objectId = `obj_${digest(Buffer.from(`hello ${suffix}`))}`;
     const actionRunId = randomUUID();
     const content = Buffer.from(`hello ${suffix}`);
     const contentDigest = digest(content);
+    const objectId = `obj_${contentDigest}`;
 
     try {
       await pool.query("insert into organizations(id,name) values($1,$2)",[organizationId,"Actions Qualification"]);
@@ -41,9 +41,9 @@ test(
       const checkpoint = {
         version: 1,
         id: checkpointId,
-        friendlyName: "Verify native push",
+        friendlyName: "Verify native pull request",
         repositoryId,
-        workstreamId: "workstream_main",
+        workstreamId: "workstream_feature",
         parentCheckpointIds: [],
         sourceManifestId: manifestId,
         sourceDigest: contentDigest,
@@ -59,8 +59,13 @@ test(
       await pool.query("insert into repository_manifests(id,repository_id,source_digest,manifest) values($1,$2,$3,$4)",[manifestId,repositoryId,contentDigest,JSON.stringify(manifest)]);
       await pool.query("insert into sessions_repository_objects(repository_id,object_id,digest,size_bytes,content) values($1,$2,$3,$4,$5)",[repositoryId,objectId,contentDigest,content.length,content]);
       await pool.query("insert into sessions_repository_checkpoints(repository_id,checkpoint_id,record) values($1,$2,$3)",[repositoryId,checkpointId,JSON.stringify(checkpoint)]);
-      await pool.query("insert into sessions_repository_refs(repository_id,ref_type,name,checkpoint_id,metadata) values($1,'branch','main',$2,$3)",[repositoryId,checkpointId,JSON.stringify({id:"workstream_main"})]);
-      await pool.query("insert into action_runs(id,workspace_id,repository_id,commit_id,trigger,status,actor_principal_id) values($1,$2,$3,$4,'sessions.push','queued',$5)",[actionRunId,workspaceId,repositoryId,checkpointId,principalId]);
+      await pool.query("insert into sessions_repository_refs(repository_id,ref_type,name,checkpoint_id,metadata) values($1,'branch','feature',$2,$3)",[repositoryId,checkpointId,JSON.stringify({id:"workstream_feature"})]);
+
+      const pull = await pool.query("insert into pull_requests(workspace_id,repository_id,number,title,base_branch,head_branch,head_commit_id,author_principal_id,required_approvals) values($1,$2,1,'Native PR','main','feature',$3,$4,0) returning id,verification_state",[workspaceId,repositoryId,checkpointId,principalId]);
+      const pullRequestId = pull.rows[0].id as string;
+      assert.equal(pull.rows[0].verification_state, "pending");
+
+      await pool.query("insert into action_runs(id,workspace_id,repository_id,commit_id,pull_request_id,trigger,status,actor_principal_id) values($1,$2,$3,$4,$5,'pull_request','queued',$6)",[actionRunId,workspaceId,repositoryId,checkpointId,pullRequestId,principalId]);
       for (const [name, category] of [["Source integrity","verification"],["Repository policy","policy"],["Recovery readiness","verification"]] as const) {
         await pool.query("insert into action_checks(action_run_id,name,category,status) values($1,$2,$3,'queued')",[actionRunId,name,category]);
       }
@@ -86,6 +91,10 @@ test(
         assert.equal(typeof check.evidence, "object");
       }
       assert.match(checks.rows.find((row) => row.name === "Source integrity")?.summary ?? "", /Verified 1 source objects/);
+
+      const verifiedPull = await pool.query("select verification_state,mergeable from pull_requests where id=$1",[pullRequestId]);
+      assert.equal(verifiedPull.rows[0]?.verification_state, "passed");
+      assert.equal(verifiedPull.rows[0]?.mergeable, true);
     } finally {
       await pool.query("delete from organizations where id=$1",[organizationId]).catch(()=>undefined);
       await pool.end();
