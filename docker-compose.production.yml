@@ -76,6 +76,8 @@ services:
       SESSIONS_MAX_BODY_BYTES: ${SESSIONS_MAX_BODY_BYTES:-1048576}
       SESSIONS_RATE_LIMIT: ${SESSIONS_RATE_LIMIT:-300}
       SESSIONS_DB_POOL_MAX: ${SESSIONS_DB_POOL_MAX:-20}
+      SESSIONS_REPOSITORY_METADATA_BYTES: ${SESSIONS_REPOSITORY_METADATA_BYTES:-16777216}
+      SESSIONS_REPOSITORY_OBJECT_BYTES: ${SESSIONS_REPOSITORY_OBJECT_BYTES:-134217728}
     expose:
       - "4000"
     depends_on:
@@ -224,6 +226,8 @@ services:
       - ./infrastructure/postgres/008-repository-collaboration.sql:/docker-entrypoint-initdb.d/008-repository-collaboration.sql:ro
       - ./infrastructure/postgres/009-lifecycle-evidence-events.sql:/docker-entrypoint-initdb.d/009-lifecycle-evidence-events.sql:ro
       - ./infrastructure/postgres/010-hosted-auth.sql:/docker-entrypoint-initdb.d/010-hosted-auth.sql:ro
+      - ./infrastructure/postgres/011-repository-onboarding.sql:/docker-entrypoint-initdb.d/011-repository-onboarding.sql:ro
+      - ./infrastructure/postgres/012-sessions-native-repository.sql:/docker-entrypoint-initdb.d/012-sessions-native-repository.sql:ro
     networks:
       - data
     healthcheck:
