@@ -29,7 +29,7 @@ echo "[sessions] building immutable release $release_id"
 echo "[sessions] starting data services"
 "${compose[@]}" up -d postgres redis minio
 
-for migration in infrastructure/postgres/init.sql infrastructure/postgres/002-hosted-repositories.sql infrastructure/postgres/003-source-storage.sql infrastructure/postgres/004-production-controls.sql infrastructure/postgres/005-commercial-operations.sql infrastructure/postgres/006-product-analytics.sql infrastructure/postgres/007-billing-integrations.sql infrastructure/postgres/008-repository-collaboration.sql; do
+for migration in infrastructure/postgres/init.sql infrastructure/postgres/002-hosted-repositories.sql infrastructure/postgres/003-source-storage.sql infrastructure/postgres/004-production-controls.sql infrastructure/postgres/005-commercial-operations.sql infrastructure/postgres/006-product-analytics.sql infrastructure/postgres/007-billing-integrations.sql infrastructure/postgres/008-repository-collaboration.sql infrastructure/postgres/009-lifecycle-evidence-events.sql; do
   "${compose[@]}" exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 < "$migration"
 done
 
