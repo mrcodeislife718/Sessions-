@@ -29,7 +29,7 @@ echo "[sessions] building immutable release $release_id"
 echo "[sessions] starting data services"
 "${compose[@]}" up -d postgres redis minio
 
-for migration in infrastructure/postgres/init.sql infrastructure/postgres/002-hosted-repositories.sql infrastructure/postgres/003-source-storage.sql infrastructure/postgres/004-production-controls.sql infrastructure/postgres/005-commercial-operations.sql infrastructure/postgres/006-product-analytics.sql infrastructure/postgres/007-billing-integrations.sql; do
+for migration in infrastructure/postgres/init.sql infrastructure/postgres/002-hosted-repositories.sql infrastructure/postgres/003-source-storage.sql infrastructure/postgres/004-production-controls.sql infrastructure/postgres/005-commercial-operations.sql infrastructure/postgres/006-product-analytics.sql infrastructure/postgres/007-billing-integrations.sql infrastructure/postgres/008-repository-collaboration.sql; do
   "${compose[@]}" exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 < "$migration"
 done
 
@@ -42,7 +42,6 @@ for i in $(seq 1 60); do
   api_ok=0; billing_ok=0
   if curl --fail --silent --show-error "https://${SESSIONS_DOMAIN}/ready" >/dev/null; then api_ok=1; fi
   if curl --fail --silent --show-error "https://${SESSIONS_DOMAIN}/api/billing/subscription" -H "Authorization: Bearer ${SESSIONS_DEPLOY_HEALTH_TOKEN:-invalid}" >/dev/null 2>&1; then billing_ok=1; fi
-  # A 401/403 from the protected billing endpoint still proves Caddy -> billing routing is alive.
   billing_code="$(curl -s -o /dev/null -w '%{http_code}' "https://${SESSIONS_DOMAIN}/api/billing/subscription" || true)"
   if [[ "$api_ok" == 1 && ( "$billing_ok" == 1 || "$billing_code" == 401 || "$billing_code" == 403 ) ]]; then
     printf '%s\n' "$release_id" > .sessions-last-good-release
