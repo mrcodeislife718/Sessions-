@@ -22,3 +22,35 @@ alter table action_checks add column if not exists container_image text;
 alter table action_checks add column if not exists timeout_seconds integer not null default 900 check (timeout_seconds between 1 and 3600);
 alter table action_checks add column if not exists log_text text not null default '';
 alter table action_checks add column if not exists exit_code integer;
+
+create or replace function sessions_enqueue_customer_workflows() returns trigger as $$
+declare
+  workflow record;
+  step jsonb;
+  run_id uuid;
+  event_name text;
+begin
+  if new.execution_kind <> 'native_verification' then return new; end if;
+  event_name := case when new.trigger in ('sessions.push','commit') then 'push' when new.trigger='pull_request' then 'pull_request' else null end;
+  if event_name is null then return new; end if;
+  for workflow in
+    select * from repository_action_workflows
+    where workspace_id=new.workspace_id and repository_id=new.repository_id and enabled=true and event_name=any(triggers)
+  loop
+    run_id := gen_random_uuid();
+    insert into action_runs(id,workspace_id,repository_id,commit_id,pull_request_id,trigger,status,actor_principal_id,workflow_id,workflow_name,execution_kind)
+    values(run_id,new.workspace_id,new.repository_id,new.commit_id,new.pull_request_id,event_name,'queued',new.actor_principal_id,workflow.id,workflow.name,'customer_workflow');
+    for step in select value from jsonb_array_elements(coalesce(workflow.definition->'steps','[]'::jsonb))
+    loop
+      insert into action_checks(action_run_id,name,category,status,command_argv,container_image,timeout_seconds)
+      values(run_id,step->>'name',coalesce(step->>'category','test'),'queued',step->'command',coalesce(step->>'image','node:22-alpine'),coalesce((step->>'timeoutSeconds')::integer,900));
+    end loop;
+  end loop;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_sessions_enqueue_customer_workflows on action_runs;
+create trigger trg_sessions_enqueue_customer_workflows
+after insert on action_runs
+for each row execute function sessions_enqueue_customer_workflows();
