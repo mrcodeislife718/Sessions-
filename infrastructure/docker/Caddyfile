@@ -10,6 +10,11 @@
     reverse_proxy api:4000
   }
 
+  @auth path /api/auth/*
+  handle @auth {
+    reverse_proxy auth:4200
+  }
+
   @billing path /api/billing/* /api/account/* /webhooks/stripe
   handle @billing {
     reverse_proxy billing:4100
