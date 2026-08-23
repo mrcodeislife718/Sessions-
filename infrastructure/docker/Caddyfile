@@ -1,0 +1,51 @@
+{$SESSIONS_DOMAIN:localhost} {
+  encode zstd gzip
+
+  @authenticatedReady {
+    path /ready
+    header Authorization *
+  }
+  handle @authenticatedReady {
+    rewrite * /api/sessions
+    reverse_proxy api:4000
+  }
+
+  @auth path /api/auth/*
+  handle @auth {
+    reverse_proxy auth:4200
+  }
+
+  # Git is an optional one-time legacy importer only. Normal repository
+  # operations are handled by the first-party Sessions-native API below.
+  @legacyGitImport path_regexp legacyGitImport ^/api/repositories/[^/]+/git-import$
+  handle @legacyGitImport {
+    reverse_proxy repositories:4300
+  }
+
+  @workflowControl path_regexp workflowControl ^/api/repositories/[^/]+/(workflows(?:/.*)?|action-runs/[^/]+)$
+  handle @workflowControl {
+    reverse_proxy workflows:4400
+  }
+
+  @billing path /api/billing/* /api/account/* /webhooks/stripe
+  handle @billing {
+    reverse_proxy billing:4100
+  }
+
+  @api path /api/* /health /ready
+  handle @api {
+    reverse_proxy api:4000
+  }
+
+  handle {
+    reverse_proxy web:3000
+  }
+
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy strict-origin-when-cross-origin
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  }
+}

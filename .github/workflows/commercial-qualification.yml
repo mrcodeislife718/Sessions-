@@ -1,0 +1,86 @@
+name: commercial qualification
+
+on:
+  push:
+    branches: [main, launch/sessions-production]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  team-auth:
+    name: self-service team administration qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: sessions, POSTGRES_PASSWORD: sessions, POSTGRES_DB: sessions }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+      AUTH_PORT: "4200"
+      SESSIONS_AUTH_QUALIFICATION_URL: http://127.0.0.1:4200
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply commercial production schema
+        run: |
+          for migration in infrastructure/postgres/init.sql infrastructure/postgres/002-hosted-repositories.sql infrastructure/postgres/003-source-storage.sql infrastructure/postgres/004-production-controls.sql infrastructure/postgres/005-commercial-operations.sql infrastructure/postgres/006-product-analytics.sql infrastructure/postgres/007-billing-integrations.sql infrastructure/postgres/008-repository-collaboration.sql infrastructure/postgres/009-lifecycle-evidence-events.sql infrastructure/postgres/010-hosted-auth.sql infrastructure/postgres/011-repository-onboarding.sql infrastructure/postgres/012-sessions-native-repository.sql infrastructure/postgres/013-team-invitations.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"; done
+      - name: Build hosted auth
+        run: pnpm --filter @sessions/api build
+      - name: Start hosted auth
+        run: |
+          node apps/api/dist/auth-server.js >/tmp/sessions-auth.log 2>&1 & echo $! >/tmp/sessions-auth.pid
+          for i in {1..30}; do if curl -fsS http://127.0.0.1:4200/health >/dev/null; then exit 0; fi; sleep 1; done
+          cat /tmp/sessions-auth.log; exit 1
+      - name: Prove signup invite role and revocation lifecycle
+        run: node scripts/qualify-team-auth.mjs
+      - name: Capture auth log
+        if: always()
+        run: cat /tmp/sessions-auth.log || true
+      - name: Stop hosted auth
+        if: always()
+        run: test ! -f /tmp/sessions-auth.pid || kill "$(cat /tmp/sessions-auth.pid)" || true
+
+  commercial-web:
+    name: commercial web surface build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build commercial customer surfaces
+        run: pnpm --filter @sessions/web build
+      - name: Require commercial routes
+        run: |
+          test -s apps/web/app/settings/page.tsx
+          test -s apps/web/app/invite/page.tsx
+          test -s 'apps/web/app/repositories/[id]/releases/page.tsx'
+          test -s 'apps/web/app/repositories/[id]/deployments/page.tsx'
+          test -s 'apps/web/app/repositories/[id]/settings/page.tsx'
+          test -s 'apps/web/app/repositories/[id]/actions/[runId]/page.tsx'
+
+  production-contract:
+    name: commercial production routing contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production topology
+        run: bash scripts/validate-production-config.sh

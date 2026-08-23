@@ -1,0 +1,314 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - launch/sessions-production
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Prepare pnpm
+        run: corepack prepare pnpm@10.15.0 --activate
+      - name: Resolve pnpm store
+        id: pnpm-cache
+        shell: bash
+        run: echo "store_path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.store_path }}
+          key: ${{ runner.os }}-node-${{ matrix.node }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ matrix.node }}-pnpm-
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify workspace
+        run: pnpm verify
+
+  postgres-qualification:
+    name: PostgreSQL migration / backup / restore qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: sessions, POSTGRES_PASSWORD: sessions, POSTGRES_DB: sessions }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Qualify migrations, persistence, backup and restore
+        run: bash scripts/qualify-postgres.sh
+
+  native-actions-qualification:
+    name: Sessions-native Actions / pull request qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: sessions, POSTGRES_PASSWORD: sessions, POSTGRES_DB: sessions }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      TEST_DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply complete production schema
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/init.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/002-hosted-repositories.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/003-source-storage.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/004-production-controls.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/005-commercial-operations.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/006-product-analytics.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/007-billing-integrations.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/008-repository-collaboration.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/009-lifecycle-evidence-events.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/010-hosted-auth.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/011-repository-onboarding.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/012-sessions-native-repository.sql
+      - name: Qualify native Actions evidence and PR verification
+        run: pnpm --filter @sessions/runner exec tsx --test src/actions.test.ts
+
+  lifecycle-recovery-qualification:
+    name: lifecycle / recovery end-to-end qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: sessions, POSTGRES_PASSWORD: sessions, POSTGRES_DB: sessions }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+      SESSIONS_ALLOW_INSECURE_LOCAL: "true"
+      SESSIONS_CORS_ORIGIN: http://localhost:3000
+      PORT: "4000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply production migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/init.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/002-hosted-repositories.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/003-source-storage.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/004-production-controls.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/005-commercial-operations.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/006-product-analytics.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/007-billing-integrations.sql
+      - name: Build API and workspace dependencies
+        run: |
+          pnpm exec tsc -b packages/shared packages/codevault-core
+          pnpm --filter @sessions/api build
+      - name: Start API
+        run: |
+          node apps/api/dist/index.js > /tmp/sessions-api.log 2>&1 & echo $! > /tmp/sessions-api.pid
+          for i in {1..30}; do if curl --fail --silent http://127.0.0.1:4000/ready >/dev/null; then exit 0; fi; sleep 1; done
+          cat /tmp/sessions-api.log; exit 1
+      - name: Qualify complete lifecycle and context recovery
+        run: node scripts/qualify-lifecycle.mjs
+      - name: Capture API log
+        if: always()
+        run: cat /tmp/sessions-api.log || true
+      - name: Stop API
+        if: always()
+        run: test ! -f /tmp/sessions-api.pid || kill "$(cat /tmp/sessions-api.pid)" || true
+
+  tenant-isolation-qualification:
+    name: tenant / authorization end-to-end qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: sessions, POSTGRES_PASSWORD: sessions, POSTGRES_DB: sessions }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+      SESSIONS_ALLOW_INSECURE_LOCAL: "false"
+      SESSIONS_CORS_ORIGIN: http://localhost:3000
+      PORT: "4000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply production migrations
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/init.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/002-hosted-repositories.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/003-source-storage.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/004-production-controls.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/005-commercial-operations.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/006-product-analytics.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/007-billing-integrations.sql
+      - name: Seed two isolated tenants
+        run: bash scripts/seed-auth-qualification.sh
+      - name: Build API and workspace dependencies
+        run: |
+          pnpm exec tsc -b packages/shared packages/codevault-core
+          pnpm --filter @sessions/api build
+      - name: Start production-auth API
+        run: |
+          node apps/api/dist/index.js > /tmp/sessions-api.log 2>&1 & echo $! > /tmp/sessions-api.pid
+          for i in {1..30}; do if curl --fail --silent http://127.0.0.1:4000/ready >/dev/null; then exit 0; fi; sleep 1; done
+          cat /tmp/sessions-api.log; exit 1
+      - name: Prove tenant isolation and scope enforcement
+        run: node scripts/qualify-tenancy.mjs
+      - name: Capture API log
+        if: always()
+        run: cat /tmp/sessions-api.log || true
+      - name: Stop API
+        if: always()
+        run: test ! -f /tmp/sessions-api.pid || kill "$(cat /tmp/sessions-api.pid)" || true
+
+  billing-qualification:
+    name: Stripe billing / entitlement / export / cancellation qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: sessions, POSTGRES_PASSWORD: sessions, POSTGRES_DB: sessions }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+      BILLING_PORT: "4100"
+      PORT: "4000"
+      SESSIONS_ALLOW_INSECURE_LOCAL: "false"
+      SESSIONS_CORS_ORIGIN: http://localhost:3000
+      BILLING_TEST_TOKEN: sessions-billing-test-token
+      STRIPE_SECRET_KEY: sk_test_qualification
+      STRIPE_WEBHOOK_SECRET: whsec_qualification
+      STRIPE_PRICE_DEVELOPER: price_qualification
+      STRIPE_API_BASE: http://127.0.0.1:4242/v1
+      SESSIONS_PUBLIC_ORIGIN: https://qualification.sessions.invalid
+      SESSIONS_API_QUALIFICATION_URL: http://127.0.0.1:4000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Seed billing qualification state
+        run: bash scripts/seed-billing-qualification.sh
+      - name: Build API and billing control plane
+        run: pnpm --filter @sessions/api build
+      - name: Start API and billing services
+        run: |
+          node apps/api/dist/index.js > /tmp/sessions-api.log 2>&1 & echo $! > /tmp/sessions-api.pid
+          node apps/api/dist/billing-server.js > /tmp/sessions-billing.log 2>&1 & echo $! > /tmp/sessions-billing.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4000/ready >/dev/null && curl --fail --silent http://127.0.0.1:4100/health >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/sessions-api.log || true
+          cat /tmp/sessions-billing.log || true
+          exit 1
+      - name: Qualify Stripe reconciliation and account lifecycle
+        run: node scripts/qualify-billing.mjs
+      - name: Capture service logs
+        if: always()
+        run: |
+          cat /tmp/sessions-api.log || true
+          cat /tmp/sessions-billing.log || true
+      - name: Stop services
+        if: always()
+        run: |
+          test ! -f /tmp/sessions-api.pid || kill "$(cat /tmp/sessions-api.pid)" || true
+          test ! -f /tmp/sessions-billing.pid || kill "$(cat /tmp/sessions-billing.pid)" || true
+
+  production-config-qualification:
+    name: production deployment configuration qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate production Compose security and migration wiring
+        run: bash scripts/validate-production-config.sh
+
+  proof-scoring-qualification:
+    name: superiority scoring software qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Verify recovery comparison scorer
+        run: |
+          node scripts/score-recovery-experiments.mjs test/fixtures/recovery-scoring-smoke.json > /tmp/recovery-score.json
+          node -e 'const x=require("/tmp/recovery-score.json"); if (!(x.comparison.orientationReductionFraction > 0) || !(x.comparison.reconstructionAccuracyDelta > 0)) process.exit(1)'

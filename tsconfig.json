@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/codevault-core" },
+    { "path": "./packages/native-repository" },
+    { "path": "./packages/timeline-engine" },
+    { "path": "./packages/verification-engine" }
+  ]
+}
