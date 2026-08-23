@@ -48,7 +48,10 @@ function safePath(value: string): string {
   return normalized;
 }
 
-function bounded(buffer: Buffer, chunk: Buffer): Buffer {
+function bounded(
+  buffer: Buffer<ArrayBufferLike>,
+  chunk: Buffer<ArrayBufferLike>,
+): Buffer<ArrayBufferLike> {
   if (buffer.length >= maxLogBytes) return buffer;
   const room = maxLogBytes - buffer.length;
   return Buffer.concat([buffer, chunk.subarray(0, room)]);
@@ -225,7 +228,7 @@ async function runContainer(
   args.push(check.container_image, ...check.command_argv);
 
   const started = Date.now();
-  let output = Buffer.alloc(0);
+  let output: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let timedOut = false;
   const child = spawn("docker", args, {
     stdio: ["ignore", "pipe", "pipe"],
