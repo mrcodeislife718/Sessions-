@@ -76,7 +76,9 @@ require_grep 'read_only: true' "$rendered" 'read-only container filesystem'
 require_grep 'no-new-privileges:true' "$rendered" 'no-new-privileges container security option'
 require_grep 'internal: true' "$rendered" 'internal production network'
 require_grep 'DOCKER_HOST: unix:///var/run/docker.sock' "$rendered" 'executor Docker host'
-require_grep '/var/run/docker.sock:/var/run/docker.sock' "$rendered" 'executor Docker socket mount'
+# Compose normalizes short volume syntax into source/target fields in `docker compose config`.
+require_regex 'source: /var/run/docker\.sock' "$rendered" 'executor Docker socket source mount'
+require_regex 'target: /var/run/docker\.sock' "$rendered" 'executor Docker socket target mount'
 require_grep 'SESSIONS_JOB_VOLUME: sessions_jobs' "$rendered" 'executor job volume'
 require_grep 'SESSIONS_ACTION_MEMORY: 1g' "$rendered" 'executor memory limit'
 require_regex 'SESSIONS_ACTION_CPUS: ("?1\.0"?|1)' "$rendered" 'executor CPU limit'
@@ -125,7 +127,6 @@ require_grep 'workspace_invitations' infrastructure/postgres/013-team-invitation
 require_grep 'repository_action_workflows' infrastructure/postgres/014-action-workflows.sql 'workflow definition schema'
 require_grep 'customer_workflow' infrastructure/postgres/014-action-workflows.sql 'customer-workflow execution kind'
 
-# Check executor security semantics without depending on source minification/formatting.
 require_grep '"--network"' apps/runner/src/workflow-executor.ts 'explicit Docker network policy flag'
 require_grep 'defaultNetwork: "none"' apps/runner/src/workflow-executor.ts 'deny-by-default executor network'
 require_grep '"--read-only"' apps/runner/src/workflow-executor.ts 'read-only executor root filesystem'
