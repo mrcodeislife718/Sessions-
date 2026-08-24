@@ -48,10 +48,32 @@ const requiredMigrations = [
 ];
 
 const productionEnvKeys = [
-  'DATABASE_URL',
-  'SESSIONS_PUBLIC_ORIGIN',
+  'SESSIONS_DOMAIN',
+  'POSTGRES_USER',
+  'POSTGRES_PASSWORD',
+  'POSTGRES_DB',
+  'REDIS_PASSWORD',
+  'MINIO_ROOT_USER',
+  'MINIO_ROOT_PASSWORD',
+  'S3_BUCKET',
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_PRICE_DEVELOPER',
+];
+
+const productionServices = [
+  'proxy',
+  'web',
+  'api',
+  'auth',
+  'repositories',
+  'workflows',
+  'billing',
+  'runner',
+  'executor',
+  'postgres',
+  'redis',
+  'minio',
 ];
 
 async function requireFile(path) {
@@ -67,7 +89,7 @@ async function main() {
 
   const pkg = JSON.parse(await readFile('package.json', 'utf8'));
   const scripts = pkg.scripts ?? {};
-  for (const script of ['verify', 'test:native', 'test:commercial', 'test:api', 'test:runner', 'docker:up', 'docker:down']) {
+  for (const script of ['verify', 'qualify:launch', 'test:native', 'test:commercial', 'test:api', 'test:runner', 'docker:up', 'docker:down']) {
     if (!scripts[script]) throw new Error(`Launch-critical package script missing: ${script}`);
   }
 
@@ -77,8 +99,17 @@ async function main() {
   }
 
   const compose = await readFile('docker-compose.production.yml', 'utf8');
-  for (const service of ['postgres', 'api', 'runner', 'web']) {
+  for (const service of productionServices) {
     if (!new RegExp(`^\s{2}${service}:`, 'm').test(compose)) throw new Error(`Production topology missing service: ${service}`);
+  }
+  for (const invariant of [
+    'DATABASE_URL: postgresql://${POSTGRES_USER',
+    'SESSIONS_PUBLIC_ORIGIN: https://${SESSIONS_DOMAIN}',
+    'STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:',
+    'STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:',
+    'SESSIONS_ALLOW_INSECURE_LOCAL: "false"',
+  ]) {
+    if (!compose.includes(invariant)) throw new Error(`Production topology invariant missing: ${invariant}`);
   }
 
   const billing = await readFile('apps/api/src/billing-server.ts', 'utf8');
@@ -87,11 +118,11 @@ async function main() {
   }
 
   const report = {
-    status: 'qualified-structure',
+    status: 'internally-launch-ready-structure',
     checkedAt: new Date().toISOString(),
     assets: requiredFiles.length,
     migrations: requiredMigrations.length,
-    productionServices: ['postgres', 'api', 'runner', 'web'],
+    productionServices,
     externalProofStillRequired: [
       'live production deployment against real secrets/domains',
       'real Stripe test/live-mode account qualification',
