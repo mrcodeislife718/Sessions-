@@ -1,0 +1,64 @@
+name: launch qualification
+
+on:
+  pull_request:
+  push:
+    branches: [main, commercial/sessions-launch-readiness]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  launch-structure-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Enable Corepack and pnpm
+        run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run canonical product verification and launch contract
+        run: pnpm qualify:launch
+      - name: Validate production topology
+        run: bash scripts/validate-production-config.sh
+
+  postgres-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sessions
+          POSTGRES_PASSWORD: sessions
+          POSTGRES_DB: sessions
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+    steps:
+      - uses: actions/checkout@v4
+      - name: Qualify production Postgres, migration and recovery path
+        run: bash scripts/qualify-postgres.sh
+
+  commercial-proof-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the externally dependent launch proofs to stay explicit
+        run: |
+          node scripts/qualify-launch.mjs | tee /tmp/launch-report.json
+          grep -q 'live production deployment against real secrets/domains' /tmp/launch-report.json
+          grep -q 'real Stripe test/live-mode account qualification' /tmp/launch-report.json
+          grep -q 'external-user onboarding and collaboration acceptance run' /tmp/launch-report.json
+          grep -q 'real customer payment and retention evidence' /tmp/launch-report.json
