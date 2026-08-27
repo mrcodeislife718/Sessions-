@@ -42,3 +42,10 @@ export function sessionsEconomicProductionGate(metrics: ReturnType<SessionsEcono
   };
   return { productive: Object.values(checks).every(Boolean), checks, metrics };
 }
+
+export const sessionsEconomicLedger = new SessionsEconomicProductionLedger();
+export function recordSessionsEconomicEvent(event: SessionsEconomicEvent): void { sessionsEconomicLedger.record(event); }
+export function sessionsEconomicSnapshot() {
+  const metrics = sessionsEconomicLedger.metrics();
+  return { ...sessionsEconomicProductionGate(metrics), metrics };
+}
