@@ -50,13 +50,14 @@ Sessions must be familiar enough that a Git/GitHub user can begin using it with 
 Git/GitHub familiarity
 + persistent engineering context
 + human/AI provenance
++ causal decision lineage
 + verification evidence
 + execution lineage
 + recovery and continuation
 = Sessions
 ```
 
-The UI should use familiar repository information architecture and interaction patterns without copying third-party branding or protected visual assets. Common workflows should require the same or fewer steps than their Git/GitHub equivalents, while Sessions-specific intelligence is revealed progressively.
+Material architecture work follows the repository's Architecture Enhancement Standard: analyze the strongest alternatives before coding, preserve or exceed their strengths, structurally eliminate weaknesses where practical, define evidence and benchmarks for each innovation, and analyze behavior at 1x, 10x, and 100x including success-too-well failures.
 
 ## The developer promise
 
@@ -69,9 +70,10 @@ The first product experience should answer, in seconds:
 5. What pull requests or issues need attention?
 6. Who or what made each change?
 7. Why was the change made?
-8. What checks passed or failed?
-9. What state is safe?
-10. Can I recover and continue the work?
+8. What caused this state and what did it cause downstream?
+9. What checks passed or failed?
+10. What state is safe?
+11. Can I recover and continue the work?
 
 ## Familiar surface, stronger system
 
@@ -94,17 +96,32 @@ The first product experience should answer, in seconds:
 
 A Session records the attributable execution story of work performed by humans, AI systems, AI agents, and services. Sessions survive chat boundaries, agent changes, machine changes, and interrupted work.
 
+### Causal Reasoning Graph
+
+Sessions treats engineering decisions and causal relationships as first-class development data rather than burying them in chat logs. Decision proposals, decisions, rejected decisions, alternatives, assumptions, evidence references, supersession, execution, source changes, checkpoints, verification, deployments and outcomes can form a durable causal lineage.
+
+The hosted API and CLI support upstream and downstream traversal by event ID or known engineering object ID:
+
+```bash
+sessions why <event-or-object-id>
+sessions causes <event-or-object-id>
+sessions consequences <event-or-object-id>
+sessions lineage <event-or-object-id>
+```
+
+Causal writes reject missing parents and cross-Session ancestry. Checkpoint and verification events are persisted transactionally with their engineering artifacts. Causal edges are also materialized into semantic relationships, while qualified decisions, assumptions, failures and outcomes can be promoted into provenance-bearing engineering memory.
+
 ### Verification
 
 Verification attaches durable evidence to commits, pull requests, releases, deployments, and Sessions rather than treating a change as trustworthy merely because it exists.
 
 ### Recovery and Continuation
 
-Sessions preserves enough source state, context, execution history, evidence, and provenance to reconstruct interrupted work and continue it safely.
+Sessions preserves enough source state, context, execution history, evidence, provenance and causal lineage to reconstruct interrupted work and continue it safely.
 
 ### AI Activity and Provenance
 
-Human and AI actions are attributable. Sessions records who or what acted, what was executed, what changed, and what evidence supports the resulting state.
+Human and AI actions are attributable. Sessions records who or what acted, what was executed, what changed, what caused it, and what evidence supports the resulting state.
 
 ## Core execution loop
 
@@ -114,6 +131,10 @@ Intent
 Branch
   ↓
 Session
+  ↓
+Decision / Assumption / Evidence
+  ↓
+Execution
   ↓
 Commit
   ↓
@@ -127,12 +148,14 @@ Release
   ↓
 Deploy
   ↓
-Recovery / Continuation
+Outcome / Recovery / Continuation
 ```
 
 ## Core engines
 
 Sessions owns its own repository engine, immutable content storage, semantic engine, verification engine, chronological activity/history engine, memory graph, execution runtime, collaboration platform, and deployment runtime. Familiar terminology is a user-experience contract, not a dependency on GitHub's implementation.
+
+The causal Timeline Engine has both in-memory qualification storage and durable PostgreSQL storage. The Memory Graph supports provenance, confidence, supersession and invalidation. The Semantic Engine stores evidence-linked, analyzer-versioned relationships and can derive semantic causal edges from Session history.
 
 ## Product surfaces
 
@@ -147,19 +170,19 @@ Sessions owns its own repository engine, immutable content storage, semantic eng
 
 ## Developer-experience doctrine
 
-Sessions should never make developers perform bookkeeping it can reliably infer itself. Repository, branch, actors, changed files, execution events, verification evidence, commit relationships, deployment state, and recovery information should be captured automatically where possible.
+Sessions should never make developers perform bookkeeping it can reliably infer itself. Repository, branch, actors, changed files, execution events, causal relationships, verification evidence, commit relationships, deployment state, and recovery information should be captured automatically where possible.
 
 The default experience remains familiar and simple. Sessions-specific depth appears through progressive disclosure.
 
 ## Reliability doctrine
 
-Critical subsystems are designed around idempotency, retryability, rollback/restore, replayability, auditability, observability, failure isolation, immutable critical history, and integrity verification.
+Critical subsystems are designed around idempotency, retryability, rollback/restore, replayability, auditability, observability, failure isolation, immutable critical history, causal integrity, and integrity verification.
 
-Sessions never treats generated output as trusted merely because an AI produced it.
+Sessions never treats generated output as trusted merely because an AI produced it. Persisted memory and semantic relationships retain provenance and confidence rather than becoming authority automatically.
 
 ## Repository implementation
 
-The `launch/sessions-production` branch contains the active implementation foundation including human/AI/service identities, attributable events, immutable source snapshots, activity/history recording and replay, verification evidence, web UI, CLI, API, runner, SDK, MCP server, VS Code extension, desktop/mobile surfaces, Docker production infrastructure, PostgreSQL persistence, billing, tenancy, recovery qualification, and production controls.
+`main` is the current canonical integration line. It contains the Sessions-native repository foundation, human/AI/service identities, durable attributable events, causal reasoning traversal, immutable source snapshots, semantic relationships, engineering memory, activity/history recording and replay, verification evidence, web UI, CLI, API, runner, SDK, MCP server, VS Code extension, desktop/mobile surfaces, Docker production infrastructure, PostgreSQL persistence, billing, tenancy, recovery qualification, and production controls.
 
 The product vocabulary rule applies across every surface. Existing internal Workstream/Checkpoint APIs can remain compatible while user-facing labels and new commands use Branch/Commit terminology.
 
@@ -169,7 +192,7 @@ Current/target platform stack includes TypeScript and Node.js, Next.js, PostgreS
 
 ## Security and governance
 
-Sessions includes workspace-scoped permissions, human/AI/service identity, capability-scoped authority, tool authorization, approval gates, sandboxed execution, secret protection, immutable evidence, integrity hashing, tenant boundaries, idempotent consequential operations, deployment/restore controls, and execution auditability.
+Sessions includes workspace-scoped permissions, human/AI/service identity, capability-scoped authority, tool authorization, approval gates, sandboxed execution, secret protection, immutable evidence, integrity hashing, tenant boundaries, idempotent consequential operations, deployment/restore controls, causal graph integrity and execution auditability.
 
 ## UX acceptance standard
 
@@ -182,6 +205,8 @@ The initial release optimizes for familiarity first. Terminology can evolve late
 - [ROADMAP.md](./ROADMAP.md)
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [RELIABILITY.md](./RELIABILITY.md)
+- [Architecture Enhancement Standard](./docs/ARCHITECTURE_ENHANCEMENT_STANDARD.md)
+- [Reasoning Graph Architecture](./docs/REASONING_GRAPH_ARCHITECTURE.md)
 - [docs/SURFACES.md](./docs/SURFACES.md)
 
 ## Ownership
