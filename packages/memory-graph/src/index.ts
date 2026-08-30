@@ -33,6 +33,91 @@ export class InMemoryMemoryStore implements MemoryStore {
   async list(repositoryId: string): Promise<EngineeringMemory[]> { return [...this.memories.values()].filter((memory) => memory.repositoryId === repositoryId).map((memory) => structuredClone(memory)); }
 }
 
+export interface SqlResult<T> { rows: T[]; rowCount: number | null; }
+export interface SqlExecutor { query<T = Record<string, unknown>>(text: string, values?: unknown[]): Promise<SqlResult<T>>; }
+
+type MemoryRow = {
+  id: string;
+  workspace_id: string;
+  repository_id: string;
+  session_id: string | null;
+  kind: MemoryKind;
+  subject: string;
+  summary: string;
+  confidence: number | string;
+  provenance_event_ids: string[] | string;
+  evidence_ids: string[] | string;
+  supersedes_memory_id: string | null;
+  status: MemoryStatus;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
+function jsonArray(value: string[] | string): string[] {
+  const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+  return Array.isArray(parsed) ? parsed.map(String) : [];
+}
+
+function iso(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function fromRow(row: MemoryRow): EngineeringMemory {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    repositoryId: row.repository_id,
+    sessionId: row.session_id ?? undefined,
+    kind: row.kind,
+    subject: row.subject,
+    summary: row.summary,
+    confidence: Number(row.confidence),
+    provenanceEventIds: jsonArray(row.provenance_event_ids),
+    evidenceIds: jsonArray(row.evidence_ids),
+    supersedesMemoryId: row.supersedes_memory_id ?? undefined,
+    status: row.status,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+export class PostgresMemoryStore implements MemoryStore {
+  constructor(private readonly sql: SqlExecutor) {}
+
+  async put(memory: EngineeringMemory): Promise<void> {
+    assertConfidence(memory.confidence, "memory confidence");
+    await this.sql.query(
+      `insert into engineering_memory
+        (id,workspace_id,repository_id,session_id,kind,subject,summary,confidence,provenance_event_ids,evidence_ids,supersedes_memory_id,status,created_at,updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       on conflict (id) do update set
+         workspace_id=excluded.workspace_id,
+         repository_id=excluded.repository_id,
+         session_id=excluded.session_id,
+         kind=excluded.kind,
+         subject=excluded.subject,
+         summary=excluded.summary,
+         confidence=excluded.confidence,
+         provenance_event_ids=excluded.provenance_event_ids,
+         evidence_ids=excluded.evidence_ids,
+         supersedes_memory_id=excluded.supersedes_memory_id,
+         status=excluded.status,
+         updated_at=excluded.updated_at`,
+      [memory.id,memory.workspaceId,memory.repositoryId,memory.sessionId??null,memory.kind,memory.subject,memory.summary,memory.confidence,JSON.stringify(memory.provenanceEventIds),JSON.stringify(memory.evidenceIds),memory.supersedesMemoryId??null,memory.status,memory.createdAt,memory.updatedAt],
+    );
+  }
+
+  async get(id: string): Promise<EngineeringMemory | undefined> {
+    const result = await this.sql.query<MemoryRow>("select * from engineering_memory where id=$1", [id]);
+    return result.rowCount ? fromRow(result.rows[0]) : undefined;
+  }
+
+  async list(repositoryId: string): Promise<EngineeringMemory[]> {
+    const result = await this.sql.query<MemoryRow>("select * from engineering_memory where repository_id=$1 order by updated_at desc,id", [repositoryId]);
+    return result.rows.map(fromRow);
+  }
+}
+
 export interface PromoteMemoryInput {
   id: string;
   workspaceId: string;
