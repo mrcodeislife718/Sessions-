@@ -1,27 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSessionEvent, type ActorIdentity } from "@sessions/shared";
-import { InMemoryMemoryStore, invalidateMemory, promoteMemory, queryMemory } from "./index.js";
+import { InMemoryMemoryStore, invalidateMemory, promoteMemory, queryMemory, type MemorySourceEvent } from "./index.js";
 
-const actor: ActorIdentity = { id: "human_test", kind: "human", displayName: "Test Human" };
-const event = createSessionEvent({
-  id: "event_decision",
-  type: "DecisionMade",
-  occurredAt: "2026-08-30T10:00:00Z",
-  workspaceId: "workspace_test",
-  projectId: "project_test",
-  repositoryId: "repository_test",
-  sessionId: "session_test",
-  actor,
-  payload: { decisionId: "decision_test", summary: "Use durable causal state" },
-});
+const event: MemorySourceEvent = { id: "event_decision", repositoryId: "repository_test" };
 
 test("memory requires provenance and supports confidence-aware retrieval", async () => {
   const store = new InMemoryMemoryStore();
   await assert.rejects(() => promoteMemory(store, {
     id: "memory_invalid", workspaceId: "workspace_test", repositoryId: "repository_test", kind: "decision", subject: "causality", summary: "missing provenance", confidence: 0.9, provenanceEvents: [],
   }), /requires provenance/);
-
   await promoteMemory(store, {
     id: "memory_1", workspaceId: "workspace_test", repositoryId: "repository_test", sessionId: "session_test", kind: "decision", subject: "Causal persistence", summary: "Persist causal engineering state", confidence: 0.95, provenanceEvents: [event], evidenceIds: ["evidence_1"], occurredAt: "2026-08-30T10:01:00Z",
   });
