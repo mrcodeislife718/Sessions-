@@ -1,5 +1,5 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import * as assert from "node:assert/strict";
+import { test } from "node:test";
 import { InMemorySemanticStore, deriveCausalSemanticRelationships, neighbors, recordRelationship, type SemanticSourceEvent } from "./index.js";
 
 const common = { workspaceId: "workspace_test", repositoryId: "repository_test" };
