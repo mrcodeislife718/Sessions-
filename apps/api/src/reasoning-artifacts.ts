@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import type http from "node:http";
 import type { Pool, PoolClient } from "pg";
 import { createSnapshot } from "@sessions/codevault-core";
-import { createSessionEvent, type ActorIdentity, type SessionEvent } from "@sessions/shared";
+import { createSessionEvent, type ActorIdentity } from "@sessions/shared";
 import { hasScope, type RequestIdentity } from "./security.js";
+import { persistCausalEvent } from "./causal-persistence.js";
 
 export class ReasoningArtifactHttpError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
@@ -39,19 +40,6 @@ async function eventForPayloadId(client: PoolClient, sessionId: string, key: str
   );
   return result.rows[0]?.id;
 }
-async function persistEvent(client: PoolClient, event: SessionEvent) {
-  if (event.causationId) {
-    const parent = await client.query<{ session_id: string }>("select session_id from session_events where id=$1", [event.causationId]);
-    if (!parent.rowCount) throw new ReasoningArtifactHttpError(409, `missing causal parent: ${event.causationId}`);
-    if (parent.rows[0].session_id !== event.sessionId) throw new ReasoningArtifactHttpError(409, "cross-session causation is not allowed");
-  }
-  await client.query(
-    `insert into session_events
-     (id,session_id,type,occurred_at,actor,payload,correlation_id,causation_id,workspace_id,project_id,repository_id)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-    [event.id,event.sessionId,event.type,event.occurredAt,JSON.stringify(event.actor),JSON.stringify(event.payload),event.correlationId??null,event.causationId??null,event.workspaceId,event.projectId,event.repositoryId],
-  );
-}
 
 export async function handleReasoningArtifacts(ctx: Context): Promise<boolean> {
   const { pool, identity, req, url, send } = ctx;
@@ -86,7 +74,7 @@ export async function handleReasoningArtifacts(ctx: Context): Promise<boolean> {
         causationId: inferredParent,
         payload: { snapshotId: snapshot.id, checkpointId: body.checkpointId ?? null, digest: snapshot.digest },
       });
-      await persistEvent(client, event);
+      await persistCausalEvent(client, event);
       await client.query("commit");
       send(201, { ...snapshot, causalEventId: event.id });
       return true;
@@ -121,7 +109,7 @@ export async function handleReasoningArtifacts(ctx: Context): Promise<boolean> {
       causationId: inferredParent,
       payload: { verificationId: id, snapshotId: body.snapshotId ?? null, kind: body.kind ?? "custom", status, summary: body.summary ?? "Verification recorded" },
     });
-    await persistEvent(client, event);
+    await persistCausalEvent(client, event);
     await client.query("commit");
     send(201, { id, status, causalEventId: event.id });
     return true;
