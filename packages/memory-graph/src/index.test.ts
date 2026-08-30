@@ -1,5 +1,5 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import * as assert from "node:assert/strict";
+import { test } from "node:test";
 import { InMemoryMemoryStore, invalidateMemory, promoteMemory, queryMemory, type MemorySourceEvent } from "./index.js";
 
 const event: MemorySourceEvent = { id: "event_decision", repositoryId: "repository_test" };
