@@ -30,12 +30,10 @@ type RuntimeState = { sessionId?: string; checkpointSnapshots?: Record<string, s
 async function loadRuntime(): Promise<RuntimeState> {
   try { return JSON.parse(await readFile(runtimeFile, "utf8")); } catch { return {}; }
 }
-
 async function saveRuntime(state: RuntimeState) {
   await mkdir(stateDir, { recursive: true });
   await writeFile(runtimeFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
-
 async function request(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
   if (!headers.has("content-type")) headers.set("content-type", "application/json");
@@ -49,18 +47,39 @@ async function request(path: string, init?: RequestInit) {
   }
   return body as any;
 }
-
 function requireSession(state: RuntimeState): string {
   if (!state.sessionId) throw new Error("No active Session. Run: sessions start <objective>");
   return state.sessionId;
 }
-
 function printChanges(changes: Awaited<ReturnType<typeof repositoryDiff>>) {
   if (!changes.length) return console.log("Clean — no source changes.");
   for (const change of changes) {
     const marker = change.kind === "added" ? "+" : change.kind === "removed" ? "-" : "~";
     console.log(`${marker} ${change.path}`);
   }
+}
+function flagValue(values: string[], name: string): string | undefined {
+  const index = values.indexOf(name);
+  return index >= 0 ? values[index + 1] : undefined;
+}
+function withoutFlags(values: string[], names: string[]): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < values.length; i += 1) {
+    if (names.includes(values[i])) { i += 1; continue; }
+    result.push(values[i]);
+  }
+  return result;
+}
+async function graphQuery(runtime: RuntimeState, action: "why" | "causes" | "consequences" | "lineage", target?: string) {
+  const sessionId = requireSession(runtime);
+  if (!target) throw new Error(`Usage: sessions ${action} <event-or-object-id>`);
+  const maxDepth = flagValue(args, "--max-depth");
+  const maxResults = flagValue(args, "--max-results");
+  const params = new URLSearchParams();
+  if (maxDepth) params.set("maxDepth", maxDepth);
+  if (maxResults) params.set("maxResults", maxResults);
+  const suffix = params.size ? `?${params}` : "";
+  console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/${action}/${encodeURIComponent(target)}${suffix}`), null, 2));
 }
 
 async function createCommit(friendlyName: string, runtime: RuntimeState) {
@@ -71,7 +90,7 @@ async function createCommit(friendlyName: string, runtime: RuntimeState) {
     const manifest = await getSourceManifest(root, checkpoint.sourceManifestId);
     const hosted = await request(`/api/sessions/${runtime.sessionId}/snapshots`, {
       method: "POST",
-      body: JSON.stringify({ entries: manifest.entries.map((entry) => ({ path: entry.path, contentHash: entry.digest, size: entry.size })) }),
+      body: JSON.stringify({ checkpointId: checkpoint.id, entries: manifest.entries.map((entry) => ({ path: entry.path, contentHash: entry.digest, size: entry.size })) }),
     });
     hostedSnapshotId = hosted.id;
     await saveRuntime({ ...runtime, checkpointSnapshots: { ...(runtime.checkpointSnapshots ?? {}), [checkpoint.id]: hosted.id } });
@@ -94,7 +113,12 @@ Source control:
 
 Sessions intelligence:
   start <objective>
-  record <EventType> [message]
+  record <EventType> [message] [--because <event-id>] [--correlation <id>]
+  decision <proposed|made|rejected|alternative|superseded> <decision-id> <summary> [--because <event-id>]
+  why <event-or-object-id> [--max-depth N] [--max-results N]
+  causes <event-or-object-id>
+  consequences <event-or-object-id> [--max-depth N] [--max-results N]
+  lineage <event-or-object-id> [--max-depth N] [--max-results N]
   verify <kind> <passed|failed|requires_review> <summary>
   timeline
   replay
@@ -113,7 +137,6 @@ Hosted connection:
 
 async function main() {
   const runtime = await loadRuntime();
-
   switch (command) {
     case "init": {
       const manifest = await initializeRepository(root, args.join(" ").trim() || undefined);
@@ -197,10 +220,7 @@ async function main() {
       return;
     }
     case "commit":
-    case "checkpoint": {
-      await createCommit(args.join(" ").trim(), runtime);
-      return;
-    }
+    case "checkpoint": { await createCommit(args.join(" ").trim(), runtime); return; }
     case "log":
     case "history": {
       const history = await listHistory(root);
@@ -231,11 +251,32 @@ async function main() {
     }
     case "record": {
       const sessionId = requireSession(runtime);
-      const [type, ...message] = args;
-      if (!type) throw new Error("Usage: sessions record <EventType> [message]");
-      console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/events`, { method: "POST", body: JSON.stringify({ type, payload: { message: message.join(" ") } }) }), null, 2));
+      const [type] = args;
+      if (!type) throw new Error("Usage: sessions record <EventType> [message] [--because <event-id>]");
+      const causationId = flagValue(args, "--because");
+      const correlationId = flagValue(args, "--correlation");
+      const message = withoutFlags(args.slice(1), ["--because", "--correlation"]).join(" ");
+      console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/events`, { method: "POST", body: JSON.stringify({ type, causationId, correlationId, payload: { message } }) }), null, 2));
       return;
     }
+    case "decision": {
+      const sessionId = requireSession(runtime);
+      const [state, decisionId, ...rest] = args;
+      if (!state || !decisionId) throw new Error("Usage: sessions decision <proposed|made|rejected|alternative|superseded> <decision-id> <summary> [--because <event-id>]");
+      const types: Record<string, string> = { proposed: "DecisionProposed", made: "DecisionMade", rejected: "DecisionRejected", alternative: "AlternativeConsidered", superseded: "DecisionSuperseded" };
+      const type = types[state];
+      if (!type) throw new Error(`Unsupported decision state: ${state}`);
+      const causationId = flagValue(rest, "--because");
+      const correlationId = flagValue(rest, "--correlation");
+      const summary = withoutFlags(rest, ["--because", "--correlation"]).join(" ").trim();
+      if (!summary) throw new Error("decision summary is required");
+      console.log(JSON.stringify(await request(`/api/sessions/${sessionId}/events`, { method: "POST", body: JSON.stringify({ type, causationId, correlationId, payload: { decisionId, summary } }) }), null, 2));
+      return;
+    }
+    case "why": { await graphQuery(runtime, "why", args[0]); return; }
+    case "causes": { await graphQuery(runtime, "causes", args[0]); return; }
+    case "consequences": { await graphQuery(runtime, "consequences", args[0]); return; }
+    case "lineage": { await graphQuery(runtime, "lineage", args[0]); return; }
     case "verify": {
       const sessionId = requireSession(runtime);
       const [kind = "custom", status = "requires_review", ...summaryParts] = args;
