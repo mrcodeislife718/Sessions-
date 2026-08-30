@@ -1,4 +1,17 @@
-import { assertConfidence, type SessionEvent } from "@sessions/shared";
+export interface SemanticSourceEvent {
+  id: string;
+  type: string;
+  occurredAt: string;
+  workspaceId: string;
+  repositoryId: string;
+  causationId?: string;
+}
+
+function assertConfidence(value: number | undefined, field = "confidence"): number | undefined {
+  if (value === undefined) return value;
+  if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${field} must be between 0 and 1`);
+  return value;
+}
 
 export type SemanticEntityKind = "component" | "file" | "decision" | "assumption" | "failure" | "fix" | "checkpoint" | "verification" | "deployment" | "outcome";
 
@@ -50,31 +63,13 @@ function jsonArray(value: string[] | string): string[] {
   const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
   return Array.isArray(parsed) ? parsed.map(String) : [];
 }
-
-function iso(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
+function iso(value: Date | string): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
 function fromRow(row: SemanticRow): SemanticRelationship {
-  return {
-    id: row.id,
-    workspaceId: row.workspace_id,
-    repositoryId: row.repository_id,
-    sourceKind: row.source_kind,
-    sourceId: row.source_id,
-    relationship: row.relationship,
-    targetKind: row.target_kind,
-    targetId: row.target_id,
-    confidence: Number(row.confidence),
-    evidenceEventIds: jsonArray(row.evidence_event_ids),
-    analyzerVersion: row.analyzer_version,
-    createdAt: iso(row.created_at),
-  };
+  return { id: row.id, workspaceId: row.workspace_id, repositoryId: row.repository_id, sourceKind: row.source_kind, sourceId: row.source_id, relationship: row.relationship, targetKind: row.target_kind, targetId: row.target_id, confidence: Number(row.confidence), evidenceEventIds: jsonArray(row.evidence_event_ids), analyzerVersion: row.analyzer_version, createdAt: iso(row.created_at) };
 }
 
 export class PostgresSemanticStore implements SemanticStore {
   constructor(private readonly sql: SqlExecutor) {}
-
   async put(edge: SemanticRelationship): Promise<void> {
     assertConfidence(edge.confidence, "semantic confidence");
     await this.sql.query(
@@ -82,20 +77,13 @@ export class PostgresSemanticStore implements SemanticStore {
         (id,workspace_id,repository_id,source_kind,source_id,relationship,target_kind,target_id,confidence,evidence_event_ids,analyzer_version,created_at)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        on conflict (id) do update set
-         workspace_id=excluded.workspace_id,
-         repository_id=excluded.repository_id,
-         source_kind=excluded.source_kind,
-         source_id=excluded.source_id,
-         relationship=excluded.relationship,
-         target_kind=excluded.target_kind,
-         target_id=excluded.target_id,
-         confidence=excluded.confidence,
-         evidence_event_ids=excluded.evidence_event_ids,
-         analyzer_version=excluded.analyzer_version`,
+         workspace_id=excluded.workspace_id, repository_id=excluded.repository_id,
+         source_kind=excluded.source_kind, source_id=excluded.source_id, relationship=excluded.relationship,
+         target_kind=excluded.target_kind, target_id=excluded.target_id, confidence=excluded.confidence,
+         evidence_event_ids=excluded.evidence_event_ids, analyzer_version=excluded.analyzer_version`,
       [edge.id,edge.workspaceId,edge.repositoryId,edge.sourceKind,edge.sourceId,edge.relationship,edge.targetKind,edge.targetId,edge.confidence,JSON.stringify(edge.evidenceEventIds),edge.analyzerVersion,edge.createdAt],
     );
   }
-
   async list(repositoryId: string): Promise<SemanticRelationship[]> {
     const result = await this.sql.query<SemanticRow>("select * from semantic_relationships where repository_id=$1 order by created_at,id", [repositoryId]);
     return result.rows.map(fromRow);
@@ -112,7 +100,7 @@ export interface RecordRelationshipInput {
   targetKind: SemanticEntityKind;
   targetId: string;
   confidence: number;
-  evidenceEvents: SessionEvent[];
+  evidenceEvents: SemanticSourceEvent[];
   analyzerVersion: string;
   occurredAt?: string;
 }
@@ -125,31 +113,17 @@ export async function recordRelationship(store: SemanticStore, input: RecordRela
   assertConfidence(input.confidence, "semantic confidence");
   if (!input.evidenceEvents.length) throw new Error("semantic relationships require evidence");
   if (input.evidenceEvents.some((event) => event.repositoryId !== input.repositoryId)) throw new Error("semantic evidence must belong to the same repository");
-
   const relationship: SemanticRelationship = {
-    id: input.id,
-    workspaceId: input.workspaceId,
-    repositoryId: input.repositoryId,
-    sourceKind: input.sourceKind,
-    sourceId: input.sourceId,
-    relationship: input.relationship,
-    targetKind: input.targetKind,
-    targetId: input.targetId,
-    confidence: input.confidence,
-    evidenceEventIds: [...new Set(input.evidenceEvents.map((event) => event.id))],
-    analyzerVersion: input.analyzerVersion,
+    id: input.id, workspaceId: input.workspaceId, repositoryId: input.repositoryId, sourceKind: input.sourceKind, sourceId: input.sourceId,
+    relationship: input.relationship, targetKind: input.targetKind, targetId: input.targetId, confidence: input.confidence,
+    evidenceEventIds: [...new Set(input.evidenceEvents.map((event) => event.id))], analyzerVersion: input.analyzerVersion,
     createdAt: input.occurredAt ?? new Date().toISOString(),
   };
   await store.put(relationship);
   return relationship;
 }
 
-export async function neighbors(
-  store: SemanticStore,
-  repositoryId: string,
-  entity: { kind: SemanticEntityKind; id: string },
-  options: { direction?: "outgoing" | "incoming" | "both"; minimumConfidence?: number } = {},
-): Promise<SemanticRelationship[]> {
+export async function neighbors(store: SemanticStore, repositoryId: string, entity: { kind: SemanticEntityKind; id: string }, options: { direction?: "outgoing" | "incoming" | "both"; minimumConfidence?: number } = {}): Promise<SemanticRelationship[]> {
   const minimumConfidence = options.minimumConfidence ?? 0;
   assertConfidence(minimumConfidence, "minimumConfidence");
   const direction = options.direction ?? "both";
@@ -163,11 +137,7 @@ export async function neighbors(
     .sort((a, b) => b.confidence - a.confidence || a.id.localeCompare(b.id));
 }
 
-export async function deriveCausalSemanticRelationships(
-  store: SemanticStore,
-  events: SessionEvent[],
-  analyzerVersion = "causal-v1",
-): Promise<SemanticRelationship[]> {
+export async function deriveCausalSemanticRelationships(store: SemanticStore, events: SemanticSourceEvent[], analyzerVersion = "causal-v1"): Promise<SemanticRelationship[]> {
   const byId = new Map(events.map((event) => [event.id, event]));
   const created: SemanticRelationship[] = [];
   for (const event of events) {
@@ -193,7 +163,7 @@ export async function deriveCausalSemanticRelationships(
   return created;
 }
 
-function classify(event: SessionEvent): SemanticEntityKind {
+function classify(event: SemanticSourceEvent): SemanticEntityKind {
   if (event.type.startsWith("Decision")) return "decision";
   if (event.type === "AssumptionRecorded") return "assumption";
   if (event.type === "VerificationFailed") return "failure";
