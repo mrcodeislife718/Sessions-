@@ -3,6 +3,7 @@ import type http from "node:http";
 import type { Pool } from "pg";
 import { createSessionEvent, type ActorIdentity, type SessionEvent, type SessionEventType } from "@sessions/shared";
 import { hasScope, type RequestIdentity } from "./security.js";
+import { handleReasoningArtifacts } from "./reasoning-artifacts.js";
 
 export class ReasoningGraphHttpError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
@@ -36,33 +37,23 @@ type QueryOptions = { maxDepth: number; maxResults: number };
 function requireScope(identity: RequestIdentity, scope: string) {
   if (!hasScope(identity, scope)) throw new ReasoningGraphHttpError(403, `missing scope: ${scope}`);
 }
-
 function actorFor(identity: RequestIdentity): ActorIdentity {
   return { id: identity.principalId, kind: identity.principalKind === "ai_worker" ? "ai_agent" : identity.principalKind, displayName: identity.displayName };
 }
-
 async function sessionFor(pool: Pool, sessionId: string, workspaceId: string) {
   const result = await pool.query("select * from sessions where id=$1 and workspace_id=$2", [sessionId, workspaceId]);
   return result.rows[0] ?? null;
 }
-
 function parseJson<T>(value: T | string): T { return typeof value === "string" ? JSON.parse(value) as T : value; }
 function fromRow(row: EventRow): SessionEvent {
   return {
-    id: row.id,
-    type: row.type,
+    id: row.id, type: row.type,
     occurredAt: row.occurred_at instanceof Date ? row.occurred_at.toISOString() : new Date(row.occurred_at).toISOString(),
-    workspaceId: row.workspace_id ?? "",
-    projectId: row.project_id ?? "",
-    repositoryId: row.repository_id ?? "",
-    sessionId: row.session_id,
-    actor: parseJson(row.actor),
-    correlationId: row.correlation_id ?? undefined,
-    causationId: row.causation_id ?? undefined,
-    payload: parseJson(row.payload),
+    workspaceId: row.workspace_id ?? "", projectId: row.project_id ?? "", repositoryId: row.repository_id ?? "",
+    sessionId: row.session_id, actor: parseJson(row.actor), correlationId: row.correlation_id ?? undefined,
+    causationId: row.causation_id ?? undefined, payload: parseJson(row.payload),
   };
 }
-
 async function listEvents(pool: Pool, sessionId: string): Promise<SessionEvent[]> {
   const result = await pool.query<EventRow>(
     "select id,session_id,type,occurred_at,actor,payload,correlation_id,causation_id,workspace_id,project_id,repository_id from session_events where session_id=$1 order by occurred_at,id",
@@ -70,7 +61,6 @@ async function listEvents(pool: Pool, sessionId: string): Promise<SessionEvent[]
   );
   return result.rows.map(fromRow);
 }
-
 function eventMatchesTarget(event: SessionEvent, target: string): boolean {
   if (event.id === target) return true;
   const payload = event.payload as Record<string, unknown>;
@@ -79,13 +69,11 @@ function eventMatchesTarget(event: SessionEvent, target: string): boolean {
   }
   return false;
 }
-
 function resolveTarget(events: SessionEvent[], target: string): SessionEvent {
   const event = events.find((candidate) => eventMatchesTarget(candidate, target));
   if (!event) throw new ReasoningGraphHttpError(404, `causal target not found: ${target}`);
   return event;
 }
-
 function limits(url: URL): QueryOptions {
   const requestedDepth = Number(url.searchParams.get("maxDepth") ?? 64);
   const requestedResults = Number(url.searchParams.get("maxResults") ?? 10_000);
@@ -94,7 +82,6 @@ function limits(url: URL): QueryOptions {
     maxResults: Math.max(1, Math.min(Number.isFinite(requestedResults) ? requestedResults : 10_000, 100_000)),
   };
 }
-
 function ancestry(events: SessionEvent[], target: string, options: QueryOptions) {
   const byId = new Map(events.map((event) => [event.id, event]));
   let current: SessionEvent | undefined = resolveTarget(events, target);
@@ -112,7 +99,6 @@ function ancestry(events: SessionEvent[], target: string, options: QueryOptions)
   }
   return { events: result.reverse(), truncated };
 }
-
 function descendants(events: SessionEvent[], target: string, options: QueryOptions) {
   const source = resolveTarget(events, target);
   const byId = new Map(events.map((event) => [event.id, event]));
@@ -138,7 +124,6 @@ function descendants(events: SessionEvent[], target: string, options: QueryOptio
   result.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id));
   return { events: result, truncated };
 }
-
 async function appendEvent(pool: Pool, event: SessionEvent): Promise<void> {
   const client = await pool.connect();
   try {
@@ -168,13 +153,13 @@ async function appendEvent(pool: Pool, event: SessionEvent): Promise<void> {
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
     throw error;
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 }
 
 export async function handleReasoningGraph(ctx: Context): Promise<boolean> {
   const { pool, identity, req, url, send } = ctx;
+  if (await handleReasoningArtifacts(ctx)) return true;
+
   const graphMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(why|causes|consequences|lineage)\/([^/]+)$/);
   if (req.method === "GET" && graphMatch) {
     requireScope(identity, "sessions:read");
@@ -187,17 +172,14 @@ export async function handleReasoningGraph(ctx: Context): Promise<boolean> {
     if (action === "why") { const result = ancestry(events, target, options); send(200, { sessionId, target, resolvedEventId: resolved.id, ...result }); return true; }
     if (action === "causes") {
       const parent = resolved.causationId ? events.find((event) => event.id === resolved.causationId) : undefined;
-      send(200, { sessionId, target, resolvedEventId: resolved.id, events: parent ? [parent] : [] });
-      return true;
+      send(200, { sessionId, target, resolvedEventId: resolved.id, events: parent ? [parent] : [] }); return true;
     }
     if (action === "consequences") { const result = descendants(events, target, options); send(200, { sessionId, target, resolvedEventId: resolved.id, ...result }); return true; }
     const upstream = ancestry(events, target, options);
     const downstream = descendants(events, target, options);
     const combined = new Map([...upstream.events, ...downstream.events].map((event) => [event.id, event]));
     send(200, {
-      sessionId, target, resolvedEventId: resolved.id,
-      ancestry: upstream.events,
-      descendants: downstream.events,
+      sessionId, target, resolvedEventId: resolved.id, ancestry: upstream.events, descendants: downstream.events,
       events: [...combined.values()].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id)),
       truncated: upstream.truncated || downstream.truncated,
     });
@@ -215,19 +197,13 @@ export async function handleReasoningGraph(ctx: Context): Promise<boolean> {
     const event = createSessionEvent({
       id: body.id?.trim() || `event_${randomUUID()}`,
       type: body.type as SessionEventType,
-      workspaceId: session.workspace_id,
-      projectId: session.project_id,
-      repositoryId: session.repository_id,
-      sessionId,
-      actor: actorFor(identity),
-      correlationId: body.correlationId?.trim() || undefined,
-      causationId: body.causationId?.trim() || undefined,
-      payload: body.payload ?? {},
+      workspaceId: session.workspace_id, projectId: session.project_id, repositoryId: session.repository_id,
+      sessionId, actor: actorFor(identity), correlationId: body.correlationId?.trim() || undefined,
+      causationId: body.causationId?.trim() || undefined, payload: body.payload ?? {},
     });
     await appendEvent(pool, event);
     send(201, event);
     return true;
   }
-
   return false;
 }
