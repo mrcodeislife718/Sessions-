@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc -b ../../packages/shared ../../packages/codevault-core ../../packages/timeline-engine .",
+    "build": "tsc -b ../../packages/shared ../../packages/codevault-core .",
     "start": "node dist/index.js",
     "start:billing": "node dist/billing-server.js",
     "start:auth": "node dist/auth-server.js",
@@ -16,7 +16,6 @@
   "dependencies": {
     "@sessions/codevault-core": "workspace:*",
     "@sessions/shared": "workspace:*",
-    "@sessions/timeline-engine": "workspace:*",
     "pg": "^8.13.1"
   },
   "devDependencies": {
