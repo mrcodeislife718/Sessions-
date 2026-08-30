@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSessionEvent, type ActorIdentity } from "@sessions/shared";
-import { InMemorySemanticStore, deriveCausalSemanticRelationships, neighbors, recordRelationship } from "./index.js";
+import { InMemorySemanticStore, deriveCausalSemanticRelationships, neighbors, recordRelationship, type SemanticSourceEvent } from "./index.js";
 
-const actor: ActorIdentity = { id: "agent_test", kind: "ai_agent", displayName: "Test Agent" };
-const common = { workspaceId: "workspace_test", projectId: "project_test", repositoryId: "repository_test", sessionId: "session_test", actor };
-const decision = createSessionEvent({ ...common, id: "decision_event", type: "DecisionMade", occurredAt: "2026-08-30T10:00:00Z", payload: { decisionId: "decision_1" } });
-const change = createSessionEvent({ ...common, id: "change_event", type: "FileChanged", causationId: decision.id, occurredAt: "2026-08-30T10:01:00Z", payload: { path: "src/index.ts" } });
-const verified = createSessionEvent({ ...common, id: "verify_event", type: "VerificationPassed", causationId: change.id, occurredAt: "2026-08-30T10:02:00Z", payload: { check: "tests" } });
+const common = { workspaceId: "workspace_test", repositoryId: "repository_test" };
+const decision: SemanticSourceEvent = { ...common, id: "decision_event", type: "DecisionMade", occurredAt: "2026-08-30T10:00:00Z" };
+const change: SemanticSourceEvent = { ...common, id: "change_event", type: "FileChanged", causationId: decision.id, occurredAt: "2026-08-30T10:01:00Z" };
+const verified: SemanticSourceEvent = { ...common, id: "verify_event", type: "VerificationPassed", causationId: change.id, occurredAt: "2026-08-30T10:02:00Z" };
 
 test("semantic relationships require evidence", async () => {
   const store = new InMemorySemanticStore();
