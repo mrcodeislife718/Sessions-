@@ -44,6 +44,7 @@ migrations=(
   infrastructure/postgres/012-sessions-native-repository.sql
   infrastructure/postgres/013-team-invitations.sql
   infrastructure/postgres/014-action-workflows.sql
+  infrastructure/postgres/015-reasoning-graph.sql
 )
 for migration in "${migrations[@]}"; do
   echo "[sessions] applying $migration"
