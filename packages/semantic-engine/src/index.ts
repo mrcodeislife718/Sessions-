@@ -28,6 +28,80 @@ export class InMemorySemanticStore implements SemanticStore {
   async list(repositoryId: string): Promise<SemanticRelationship[]> { return [...this.relationships.values()].filter((item) => item.repositoryId === repositoryId).map((item) => structuredClone(item)); }
 }
 
+export interface SqlResult<T> { rows: T[]; rowCount: number | null; }
+export interface SqlExecutor { query<T = Record<string, unknown>>(text: string, values?: unknown[]): Promise<SqlResult<T>>; }
+
+type SemanticRow = {
+  id: string;
+  workspace_id: string;
+  repository_id: string;
+  source_kind: SemanticEntityKind;
+  source_id: string;
+  relationship: string;
+  target_kind: SemanticEntityKind;
+  target_id: string;
+  confidence: number | string;
+  evidence_event_ids: string[] | string;
+  analyzer_version: string;
+  created_at: Date | string;
+};
+
+function jsonArray(value: string[] | string): string[] {
+  const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+  return Array.isArray(parsed) ? parsed.map(String) : [];
+}
+
+function iso(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function fromRow(row: SemanticRow): SemanticRelationship {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    repositoryId: row.repository_id,
+    sourceKind: row.source_kind,
+    sourceId: row.source_id,
+    relationship: row.relationship,
+    targetKind: row.target_kind,
+    targetId: row.target_id,
+    confidence: Number(row.confidence),
+    evidenceEventIds: jsonArray(row.evidence_event_ids),
+    analyzerVersion: row.analyzer_version,
+    createdAt: iso(row.created_at),
+  };
+}
+
+export class PostgresSemanticStore implements SemanticStore {
+  constructor(private readonly sql: SqlExecutor) {}
+
+  async put(edge: SemanticRelationship): Promise<void> {
+    assertConfidence(edge.confidence, "semantic confidence");
+    await this.sql.query(
+      `insert into semantic_relationships
+        (id,workspace_id,repository_id,source_kind,source_id,relationship,target_kind,target_id,confidence,evidence_event_ids,analyzer_version,created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       on conflict (id) do update set
+         workspace_id=excluded.workspace_id,
+         repository_id=excluded.repository_id,
+         source_kind=excluded.source_kind,
+         source_id=excluded.source_id,
+         relationship=excluded.relationship,
+         target_kind=excluded.target_kind,
+         target_id=excluded.target_id,
+         confidence=excluded.confidence,
+         evidence_event_ids=excluded.evidence_event_ids,
+         analyzer_version=excluded.analyzer_version`,
+      [edge.id,edge.workspaceId,edge.repositoryId,edge.sourceKind,edge.sourceId,edge.relationship,edge.targetKind,edge.targetId,edge.confidence,JSON.stringify(edge.evidenceEventIds),edge.analyzerVersion,edge.createdAt],
+    );
+  }
+
+  async list(repositoryId: string): Promise<SemanticRelationship[]> {
+    const result = await this.sql.query<SemanticRow>("select * from semantic_relationships where repository_id=$1 order by created_at,id", [repositoryId]);
+    return result.rows.map(fromRow);
+  }
+}
+
 export interface RecordRelationshipInput {
   id: string;
   workspaceId: string;
