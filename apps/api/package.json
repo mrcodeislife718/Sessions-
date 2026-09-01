@@ -11,7 +11,7 @@
     "start:auth": "node dist/auth-server.js",
     "start:repositories": "node dist/repository-server.js",
     "typecheck": "tsc -p . --noEmit",
-    "test": "npm run build && node --test dist/security.test.js dist/billing.test.js dist/reliability-efficiency.test.js dist/economic-production.test.js"
+    "test": "npm run build && node --test dist/security.test.js dist/billing.test.js dist/reliability-efficiency.test.js dist/economic-production.test.js dist/execution-lineage.test.js"
   },
   "dependencies": {
     "@sessions/codevault-core": "workspace:*",
