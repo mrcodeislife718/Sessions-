@@ -20,6 +20,26 @@ export type DecisionEventType =
   | "DecisionSuperseded"
   | "OutcomeObserved";
 
+export type ExecutionEventType =
+  | "ObjectiveReceived"
+  | "PlanCreated"
+  | "TaskCreated"
+  | "WorkerAssigned"
+  | "ProviderSessionBound"
+  | "AuthorityEvaluated"
+  | "WorktreeCreated"
+  | "FilesInspected"
+  | "PatchProposed"
+  | "PatchApproved"
+  | "TestExecuted"
+  | "ReviewPassed"
+  | "ReviewFailed"
+  | "CommitCreated"
+  | "RepairStarted"
+  | "RepairCompleted"
+  | "TaskCompleted"
+  | "TaskFailed";
+
 export type SessionEventType =
   | "SessionStarted"
   | "SessionCompleted"
@@ -42,7 +62,8 @@ export type SessionEventType =
   | "RollbackCompleted"
   | "ReplayStarted"
   | "ReplayCompleted"
-  | DecisionEventType;
+  | DecisionEventType
+  | ExecutionEventType;
 
 export interface SessionEvent<TPayload = Record<string, unknown>> {
   id: string;
@@ -92,6 +113,37 @@ export interface AssumptionPayload {
   expiresAt?: string;
 }
 
+export interface ExecutionLineagePayload {
+  objectiveId?: string;
+  taskId?: string;
+  logicalWorkerId?: string;
+  providerSessionId?: string;
+  provider?: string;
+  model?: string;
+  role?: string;
+  authorityDecision?: "allowed" | "denied" | "approval_required";
+  approvalId?: string;
+  commandClass?: string;
+  tool?: string;
+  args?: string[];
+  branch?: string;
+  worktree?: string;
+  path?: string;
+  beforeHash?: string;
+  afterHash?: string;
+  checkpointId?: string;
+  commitSha?: string;
+  verificationId?: string;
+  evidenceIds?: string[];
+  failureCategory?: string;
+  retryable?: boolean;
+  replanRequired?: boolean;
+  rollbackRequired?: boolean;
+  outcome?: string;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export function assertActorIdentity(actor: ActorIdentity): ActorIdentity {
   if (!actor.id.trim()) throw new Error("actor.id is required");
   if (!actor.displayName.trim()) throw new Error("actor.displayName is required");
@@ -109,10 +161,7 @@ export function createSessionEvent<TPayload>(input: Omit<SessionEvent<TPayload>,
   if (!input.id.trim()) throw new Error("event.id is required");
   if (!input.sessionId.trim()) throw new Error("event.sessionId is required");
   if (input.causationId === input.id) throw new Error("event cannot cause itself");
-  return {
-    ...input,
-    occurredAt: input.occurredAt ?? new Date().toISOString(),
-  };
+  return { ...input, occurredAt: input.occurredAt ?? new Date().toISOString() };
 }
 
 export function createDecisionEvent(
@@ -124,5 +173,26 @@ export function createDecisionEvent(
   if (!input.payload.decisionId.trim()) throw new Error("decisionId is required");
   if (!input.payload.summary.trim()) throw new Error("decision summary is required");
   assertConfidence(input.payload.confidence, "decision confidence");
+  return createSessionEvent(input);
+}
+
+const taskRequired = new Set<ExecutionEventType>([
+  "TaskCreated", "WorkerAssigned", "ProviderSessionBound", "AuthorityEvaluated", "WorktreeCreated", "FilesInspected",
+  "PatchProposed", "PatchApproved", "TestExecuted", "ReviewPassed", "ReviewFailed", "CommitCreated", "RepairStarted",
+  "RepairCompleted", "TaskCompleted", "TaskFailed",
+]);
+
+export function createExecutionEvent(
+  input: Omit<SessionEvent<ExecutionLineagePayload>, "occurredAt"> & { type: ExecutionEventType; occurredAt?: string },
+): SessionEvent<ExecutionLineagePayload> {
+  const payload = input.payload ?? {};
+  if (taskRequired.has(input.type) && !payload.taskId?.trim()) throw new Error(`${input.type} requires payload.taskId`);
+  if ((input.type === "WorkerAssigned" || input.type === "ProviderSessionBound") && !payload.logicalWorkerId?.trim()) throw new Error(`${input.type} requires payload.logicalWorkerId`);
+  if (input.type === "ProviderSessionBound" && !payload.providerSessionId?.trim()) throw new Error("ProviderSessionBound requires payload.providerSessionId");
+  if (input.type === "AuthorityEvaluated" && !payload.authorityDecision) throw new Error("AuthorityEvaluated requires payload.authorityDecision");
+  if (input.type === "WorktreeCreated" && !payload.worktree?.trim()) throw new Error("WorktreeCreated requires payload.worktree");
+  if (input.type === "CommitCreated" && !payload.commitSha?.trim()) throw new Error("CommitCreated requires payload.commitSha");
+  if ((input.type === "ReviewPassed" || input.type === "TestExecuted") && (!payload.evidenceIds || payload.evidenceIds.length === 0)) throw new Error(`${input.type} requires evidenceIds`);
+  if (input.type === "TaskCompleted" && (!payload.evidenceIds || payload.evidenceIds.length === 0)) throw new Error("TaskCompleted requires evidenceIds");
   return createSessionEvent(input);
 }
