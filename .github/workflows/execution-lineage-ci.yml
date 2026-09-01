@@ -1,0 +1,57 @@
+name: Execution Lineage CI
+on:
+  push:
+    branches: [implementation/audit-closure-2026-09-01]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: corepack enable && corepack prepare pnpm@10.15.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sessions/api typecheck
+      - run: pnpm --filter @sessions/api test
+
+  postgres-lineage:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sessions
+          POSTGRES_PASSWORD: sessions
+          POSTGRES_DB: sessions
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sessions -d sessions"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://sessions:sessions@localhost:5432/sessions
+      PGPASSWORD: sessions
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Apply canonical migrations through execution lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/init.sql
+          for migration in infrastructure/postgres/[0-9][0-9][0-9]-*.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Prove lineage indexes exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          indexes="$(psql "$DATABASE_URL" -Atc "select indexname from pg_indexes where schemaname='public' and indexname in ('session_events_task_id_idx','session_events_logical_worker_id_idx','session_events_provider_session_id_idx','session_events_commit_sha_idx','session_events_worktree_idx') order by indexname")"
+          count="$(printf '%s\n' "$indexes" | sed '/^$/d' | wc -l)"
+          test "$count" -eq 5
