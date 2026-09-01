@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type http from "node:http";
 import type { Pool } from "pg";
-import { createSessionEvent, type ActorIdentity, type SessionEvent, type SessionEventType } from "@sessions/shared";
+import {
+  createExecutionEvent,
+  createSessionEvent,
+  type ActorIdentity,
+  type ExecutionEventType,
+  type SessionEvent,
+  type SessionEventType,
+} from "@sessions/shared";
 import { hasScope, type RequestIdentity } from "./security.js";
 import { handleReasoningArtifacts } from "./reasoning-artifacts.js";
 import { persistCausalEvent } from "./causal-persistence.js";
@@ -17,6 +24,12 @@ type EventRow = {
   workspace_id: string | null; project_id: string | null; repository_id: string | null;
 };
 type QueryOptions = { maxDepth: number; maxResults: number };
+
+const executionTypes = new Set<ExecutionEventType>([
+  "ObjectiveReceived", "PlanCreated", "TaskCreated", "WorkerAssigned", "ProviderSessionBound", "AuthorityEvaluated",
+  "WorktreeCreated", "FilesInspected", "PatchProposed", "PatchApproved", "TestExecuted", "ReviewPassed", "ReviewFailed",
+  "CommitCreated", "RepairStarted", "RepairCompleted", "TaskCompleted", "TaskFailed",
+]);
 
 function requireScope(identity: RequestIdentity, scope: string) { if (!hasScope(identity, scope)) throw new ReasoningGraphHttpError(403, `missing scope: ${scope}`); }
 function actorFor(identity: RequestIdentity): ActorIdentity { return { id: identity.principalId, kind: identity.principalKind === "ai_worker" ? "ai_agent" : identity.principalKind, displayName: identity.displayName }; }
@@ -38,7 +51,10 @@ async function listEvents(pool: Pool, sessionId: string): Promise<SessionEvent[]
 function eventMatchesTarget(event: SessionEvent, target: string): boolean {
   if (event.id === target) return true;
   const payload = event.payload as Record<string, unknown>;
-  return ["decisionId","checkpointId","snapshotId","verificationId","deploymentId","rollbackId","releaseId","outcomeId"].some((key) => String(payload?.[key] ?? "") === target);
+  return [
+    "decisionId", "checkpointId", "snapshotId", "verificationId", "deploymentId", "rollbackId", "releaseId", "outcomeId",
+    "objectiveId", "taskId", "logicalWorkerId", "providerSessionId", "approvalId", "worktree", "commitSha",
+  ].some((key) => String(payload?.[key] ?? "") === target);
 }
 function resolveTarget(events: SessionEvent[], target: string): SessionEvent {
   const event = events.find((candidate) => eventMatchesTarget(candidate, target));
@@ -116,7 +132,20 @@ export async function handleReasoningGraph(ctx: Context): Promise<boolean> {
     const sessionId = eventMatch[1], session = await sessionFor(pool, sessionId, identity.workspaceId);
     if (!session) throw new ReasoningGraphHttpError(404, "session not found");
     const body = await ctx.body(); if (!body.type) throw new ReasoningGraphHttpError(400, "event type is required");
-    const event = createSessionEvent({ id: body.id?.trim() || `event_${randomUUID()}`, type: body.type as SessionEventType, workspaceId: session.workspace_id, projectId: session.project_id, repositoryId: session.repository_id, sessionId, actor: actorFor(identity), correlationId: body.correlationId?.trim() || undefined, causationId: body.causationId?.trim() || undefined, payload: body.payload ?? {} });
+    const base = {
+      id: body.id?.trim() || `event_${randomUUID()}`,
+      workspaceId: session.workspace_id,
+      projectId: session.project_id,
+      repositoryId: session.repository_id,
+      sessionId,
+      actor: actorFor(identity),
+      correlationId: body.correlationId?.trim() || undefined,
+      causationId: body.causationId?.trim() || undefined,
+      payload: body.payload ?? {},
+    };
+    const event = executionTypes.has(body.type as ExecutionEventType)
+      ? createExecutionEvent({ ...base, type: body.type as ExecutionEventType })
+      : createSessionEvent({ ...base, type: body.type as SessionEventType });
     await appendEvent(pool, event); send(201, event); return true;
   }
   return false;
