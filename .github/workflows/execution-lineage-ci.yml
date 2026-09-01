@@ -16,7 +16,7 @@ jobs:
         with: { node-version: 22 }
       - run: corepack enable && corepack prepare pnpm@10.15.0 --activate
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @sessions/api typecheck
+      - run: pnpm --filter @sessions/api build
       - run: pnpm --filter @sessions/api test
 
   postgres-lineage:
