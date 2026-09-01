@@ -8,20 +8,27 @@ export class CausalPersistenceError extends Error {
 function semanticKind(type: string): string {
   if (type.startsWith("Decision") || type === "AlternativeConsidered") return "decision";
   if (type === "AssumptionRecorded") return "assumption";
-  if (type === "VerificationFailed") return "failure";
-  if (type === "VerificationPassed" || type === "VerificationStarted") return "verification";
+  if (type === "VerificationFailed" || type === "TaskFailed" || type === "ReviewFailed") return "failure";
+  if (type === "VerificationPassed" || type === "VerificationStarted" || type === "TestExecuted" || type === "ReviewPassed") return "verification";
   if (type.startsWith("Deployment")) return "deployment";
-  if (type === "OutcomeObserved") return "outcome";
+  if (type === "OutcomeObserved" || type === "TaskCompleted") return "outcome";
   if (type === "SnapshotCreated") return "checkpoint";
-  if (type === "FileChanged") return "file";
+  if (type === "FileChanged" || type === "PatchProposed" || type === "PatchApproved") return "file";
+  if (type === "TaskCreated") return "task";
+  if (type === "WorkerAssigned" || type === "ProviderSessionBound") return "worker";
+  if (type === "AuthorityEvaluated") return "authority";
+  if (type === "WorktreeCreated") return "worktree";
+  if (type === "CommitCreated") return "commit";
+  if (type === "ObjectiveReceived" || type === "PlanCreated") return "objective";
+  if (type === "RepairStarted" || type === "RepairCompleted") return "repair";
   return "component";
 }
 
 function memoryKind(type: string): string | undefined {
   if (type === "DecisionMade") return "decision";
   if (type === "AssumptionRecorded") return "assumption";
-  if (type === "VerificationFailed") return "failure";
-  if (type === "OutcomeObserved") return "outcome";
+  if (type === "VerificationFailed" || type === "TaskFailed" || type === "ReviewFailed") return "failure";
+  if (type === "OutcomeObserved" || type === "TaskCompleted") return "outcome";
   return undefined;
 }
 
@@ -32,12 +39,12 @@ function safeConfidence(value: unknown): number {
 
 function memorySubject(event: SessionEvent): string {
   const payload = event.payload as Record<string, unknown>;
-  return String(payload.decisionId ?? payload.assumptionId ?? payload.outcomeId ?? payload.verificationId ?? event.type);
+  return String(payload.decisionId ?? payload.assumptionId ?? payload.outcomeId ?? payload.verificationId ?? payload.taskId ?? event.type);
 }
 
 function memorySummary(event: SessionEvent): string {
   const payload = event.payload as Record<string, unknown>;
-  return String(payload.summary ?? payload.rationale ?? payload.message ?? `${event.type} recorded`);
+  return String(payload.summary ?? payload.rationale ?? payload.message ?? payload.outcome ?? `${event.type} recorded`);
 }
 
 export async function persistCausalEvent(client: PoolClient, event: SessionEvent): Promise<void> {
