@@ -1,7 +1,8 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
 import { createWorkstream, checkoutWorkstream, initializeRepository, restoreCheckpoint } from "./core.js";
 import { commitChange, integrateChange, listConflicts, listOperations, undoOperation } from "./evolution.js";
 
@@ -19,9 +20,9 @@ describe("native repository evolution", () => {
     try {
       await writeFile(join(f.root,"file.txt"),"two\n");
       const rewritten = await commitChange(f.root,{friendlyName:"refine",changeId:f.first.change.id,actorIds:["ai:builder"]});
-      expect(rewritten.change.id).toBe(f.first.change.id);
-      expect(rewritten.change.checkpointIds).toEqual([f.first.checkpoint.id, rewritten.checkpoint.id]);
-      expect(rewritten.checkpoint.id).not.toBe(f.first.checkpoint.id);
+      assert.equal(rewritten.change.id, f.first.change.id);
+      assert.deepEqual(rewritten.change.checkpointIds, [f.first.checkpoint.id, rewritten.checkpoint.id]);
+      assert.notEqual(rewritten.checkpoint.id, f.first.checkpoint.id);
     } finally { await rm(f.root,{recursive:true,force:true}); }
   });
 
@@ -31,11 +32,11 @@ describe("native repository evolution", () => {
       await writeFile(join(f.root,"file.txt"),"two\n");
       const second = await commitChange(f.root,{friendlyName:"second"});
       const beforeUndo = await listOperations(f.root);
-      expect(beforeUndo.some(item=>item.id===second.operation.id)).toBe(true);
+      assert.equal(beforeUndo.some(item=>item.id===second.operation.id), true);
       const undone = await undoOperation(f.root,second.operation.id,["human:1"]);
-      expect(undone.undone.id).toBe(second.operation.id);
+      assert.equal(undone.undone.id, second.operation.id);
       const operations = await listOperations(f.root);
-      expect(operations[0].type).toBe("undo");
+      assert.equal(operations[0]?.type, "undo");
     } finally { await rm(f.root,{recursive:true,force:true}); }
   });
 
@@ -50,9 +51,9 @@ describe("native repository evolution", () => {
       await writeFile(join(f.root,"file.txt"),"main\n");
       await commitChange(f.root,{friendlyName:"main-change"});
       const result = await integrateChange(f.root,"feature");
-      expect(result.checkpoint).toBeUndefined();
-      expect(result.conflict?.status).toBe("unresolved");
-      expect((await listConflicts(f.root,"unresolved")).length).toBe(1);
+      assert.equal(result.checkpoint, undefined);
+      assert.equal(result.conflict?.status, "unresolved");
+      assert.equal((await listConflicts(f.root,"unresolved")).length, 1);
       await restoreCheckpoint(f.root,f.first.checkpoint.id);
     } finally { await rm(f.root,{recursive:true,force:true}); }
   });
