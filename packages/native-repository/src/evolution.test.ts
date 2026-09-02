@@ -80,7 +80,7 @@ describe("native repository evolution", () => {
       assert.equal(records[0]?.objective,"refine file");
       assert.equal(records[1]?.checkpointId,f.first.checkpoint.id);
       assert.equal(records[1]?.kind,"added");
-      assert.throws(()=>pathHistory(f.root,"../outside"),/Invalid repository path/);
+      await assert.rejects(()=>pathHistory(f.root,"../outside"),/Invalid repository path/);
     } finally { await rm(f.root,{recursive:true,force:true}); }
   });
 });
