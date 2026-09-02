@@ -10,7 +10,7 @@
     "typecheck": "tsc -b packages/shared packages/codevault-core packages/native-repository packages/commercial-core packages/timeline-engine packages/memory-graph packages/semantic-engine packages/verification-engine --pretty false && pnpm --filter @sessions/sdk typecheck && pnpm --filter @sessions/api typecheck && pnpm --filter @sessions/runner typecheck && pnpm --filter @sessions/cli typecheck && pnpm --filter @sessions/mcp typecheck && pnpm --filter sessions-vscode typecheck && pnpm --filter @sessions/desktop typecheck && pnpm --filter @sessions/mobile typecheck && pnpm --filter @sessions/web typecheck",
     "verify": "pnpm typecheck && pnpm build && pnpm test:native && pnpm test:reasoning && pnpm test:commercial && pnpm test:api && pnpm test:runner",
     "qualify:launch": "pnpm verify && node scripts/qualify-launch.mjs",
-    "test:native": "pnpm exec tsc -b packages/shared packages/codevault-core packages/native-repository && node --test packages/native-repository/dist/index.test.js",
+    "test:native": "pnpm exec tsc -b packages/shared packages/codevault-core packages/native-repository && node --test packages/native-repository/dist/index.test.js packages/native-repository/dist/evolution.test.js",
     "test:reasoning": "pnpm exec tsc -b packages/shared packages/timeline-engine packages/memory-graph packages/semantic-engine && node --test packages/timeline-engine/dist/index.test.js packages/memory-graph/dist/index.test.js packages/semantic-engine/dist/index.test.js",
     "test:commercial": "pnpm --filter @sessions/commercial-core test",
     "test:api": "pnpm --filter @sessions/api test",
