@@ -30,12 +30,13 @@ export interface ChangeRecord {
 export interface RepositoryOperation {
   version: 1;
   id: string;
-  type: "commit" | "integrate" | "restore" | "checkout" | "undo";
+  type: "commit" | "integrate" | "restore" | "checkout" | "undo" | "resolve-conflict";
   repositoryId: string;
   actorIds: string[];
   before: { workstreamId: string; headCheckpointId?: string; sourceDigest: string; clean: boolean };
   after: { workstreamId: string; headCheckpointId?: string; sourceDigest: string; clean: boolean };
   relatedChangeId?: string;
+  relatedConflictId?: string;
   relatedCheckpointIds: string[];
   undoneOperationId?: string;
   createdAt: string;
@@ -55,6 +56,7 @@ export interface ConflictRecord {
   createdAt: string;
   resolvedAt?: string;
   resolutionCheckpointId?: string;
+  resolutionOperationId?: string;
 }
 
 const internal = (root: string) => ({
@@ -160,11 +162,24 @@ export async function integrateChange(root: string, sourceReference: string, act
   return { ...result, operation };
 }
 
-export async function resolveConflict(root: string, conflictId: string, resolutionCheckpointId: string): Promise<ConflictRecord> {
+export async function resolveConflict(root: string, conflictId: string, resolutionCheckpointId: string, actorIds: string[] = []): Promise<ConflictRecord> {
   const path = join(internal(root).conflicts, `${conflictId}.json`);
   const record = await readJson<ConflictRecord>(path);
-  await getCheckpoint(root, resolutionCheckpointId);
-  record.status = "resolved"; record.resolvedAt = new Date().toISOString(); record.resolutionCheckpointId = resolutionCheckpointId;
+  if (record.status !== "unresolved") throw new Error(`Conflict is not unresolved: ${conflictId}`);
+  const resolutionCheckpoint = await getCheckpoint(root, resolutionCheckpointId);
+  const before = await snapshot(root);
+  const operation = await appendOperation(root, {
+    type:"resolve-conflict",
+    actorIds:[...actorIds],
+    before,
+    after:before,
+    relatedConflictId:record.id,
+    relatedCheckpointIds:[resolutionCheckpoint.id],
+  });
+  record.status = "resolved";
+  record.resolvedAt = new Date().toISOString();
+  record.resolutionCheckpointId = resolutionCheckpoint.id;
+  record.resolutionOperationId = operation.id;
   await writeJson(path, record);
   return record;
 }
