@@ -48,10 +48,10 @@ jobs:
           for migration in infrastructure/postgres/[0-9][0-9][0-9]-*.sql; do
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
           done
-      - name: Prove lineage indexes exist
+      - name: Prove lineage and bounded traversal indexes exist
         shell: bash
         run: |
           set -euo pipefail
-          indexes="$(psql "$DATABASE_URL" -Atc "select indexname from pg_indexes where schemaname='public' and indexname in ('session_events_task_id_idx','session_events_logical_worker_id_idx','session_events_provider_session_id_idx','session_events_commit_sha_idx','session_events_worktree_idx') order by indexname")"
+          indexes="$(psql "$DATABASE_URL" -Atc "select indexname from pg_indexes where schemaname='public' and indexname in ('session_events_task_id_idx','session_events_logical_worker_id_idx','session_events_provider_session_id_idx','session_events_commit_sha_idx','session_events_worktree_idx','session_events_workspace_session_id_idx','session_events_workspace_session_causation_idx','session_events_workspace_session_occurred_idx') order by indexname")"
           count="$(printf '%s\n' "$indexes" | sed '/^$/d' | wc -l)"
-          test "$count" -eq 5
+          test "$count" -eq 8
