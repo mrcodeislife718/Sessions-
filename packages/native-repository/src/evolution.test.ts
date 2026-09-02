@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkstream, checkoutWorkstream, initializeRepository, restoreCheckpoint } from "./core.js";
-import { commitChange, integrateChange, listConflicts, listOperations, undoOperation } from "./evolution.js";
+import { commitChange, integrateChange, listConflicts, listOperations, resolveConflict, undoOperation } from "./evolution.js";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "sessions-evolution-"));
@@ -40,7 +40,7 @@ describe("native repository evolution", () => {
     } finally { await rm(f.root,{recursive:true,force:true}); }
   });
 
-  it("persists merge conflicts as durable repository objects instead of transient errors", async () => {
+  it("persists merge conflicts and records their resolution as immutable repository history", async () => {
     const f = await fixture();
     try {
       const feature = await createWorkstream(f.root,{name:"feature",fromCheckpointId:f.first.checkpoint.id});
@@ -49,11 +49,19 @@ describe("native repository evolution", () => {
       await commitChange(f.root,{friendlyName:"feature-change"});
       await checkoutWorkstream(f.root,"main");
       await writeFile(join(f.root,"file.txt"),"main\n");
-      await commitChange(f.root,{friendlyName:"main-change"});
+      const mainChange = await commitChange(f.root,{friendlyName:"main-change"});
       const result = await integrateChange(f.root,"feature");
       assert.equal(result.checkpoint, undefined);
       assert.equal(result.conflict?.status, "unresolved");
       assert.equal((await listConflicts(f.root,"unresolved")).length, 1);
+      const resolved = await resolveConflict(f.root,result.conflict!.id,mainChange.checkpoint.id,["human:maintainer"]);
+      assert.equal(resolved.status,"resolved");
+      assert.equal(resolved.resolutionCheckpointId,mainChange.checkpoint.id);
+      assert.ok(resolved.resolutionOperationId);
+      const resolutionOperation = (await listOperations(f.root)).find(item=>item.id===resolved.resolutionOperationId);
+      assert.equal(resolutionOperation?.type,"resolve-conflict");
+      assert.equal(resolutionOperation?.relatedConflictId,result.conflict!.id);
+      assert.deepEqual(resolutionOperation?.actorIds,["human:maintainer"]);
       await restoreCheckpoint(f.root,f.first.checkpoint.id);
     } finally { await rm(f.root,{recursive:true,force:true}); }
   });
