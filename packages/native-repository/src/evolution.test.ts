@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkstream, checkoutWorkstream, initializeRepository, restoreCheckpoint } from "./core.js";
 import { commitChange, integrateChange, listConflicts, listOperations, resolveConflict, undoOperation } from "./evolution.js";
+import { pathHistory } from "./provenance.js";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "sessions-evolution-"));
@@ -63,6 +64,23 @@ describe("native repository evolution", () => {
       assert.equal(resolutionOperation?.relatedConflictId,result.conflict!.id);
       assert.deepEqual(resolutionOperation?.actorIds,["human:maintainer"]);
       await restoreCheckpoint(f.root,f.first.checkpoint.id);
+    } finally { await rm(f.root,{recursive:true,force:true}); }
+  });
+
+  it("reports path-level provenance directly from native checkpoint history", async () => {
+    const f=await fixture();
+    try {
+      await writeFile(join(f.root,"file.txt"),"two\n");
+      const second=await commitChange(f.root,{friendlyName:"second",actorIds:["ai:builder"],objective:"refine file"});
+      const records=await pathHistory(f.root,"file.txt");
+      assert.equal(records.length,2);
+      assert.equal(records[0]?.checkpointId,second.checkpoint.id);
+      assert.equal(records[0]?.kind,"modified");
+      assert.deepEqual(records[0]?.actorIds,["ai:builder"]);
+      assert.equal(records[0]?.objective,"refine file");
+      assert.equal(records[1]?.checkpointId,f.first.checkpoint.id);
+      assert.equal(records[1]?.kind,"added");
+      assert.throws(()=>pathHistory(f.root,"../outside"),/Invalid repository path/);
     } finally { await rm(f.root,{recursive:true,force:true}); }
   });
 });
