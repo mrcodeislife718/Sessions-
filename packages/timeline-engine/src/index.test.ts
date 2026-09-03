@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { InMemoryTimelineStore, CausalIntegrityError, causes, consequences, why } from "./index.js";
+import { PersistentWorkspace } from "./persistent-workspace.js";
 import { createSessionEvent, type ActorIdentity, type SessionEventType } from "@sessions/shared";
 
 const actor: ActorIdentity = { id: "human_test", kind: "human", displayName: "Test Human" };
@@ -34,4 +35,20 @@ test("causal graph rejects cross-session ancestry", async () => {
   await store.append(event("e1", "SessionStarted"));
   const other = createSessionEvent({ ...base, sessionId: "session_other", id: "e2", type: "DecisionMade", causationId: "e1", payload: {} });
   await assert.rejects(() => store.append(other), CausalIntegrityError);
+});
+
+test("persistent workspace supports multiplayer authorship, snapshots, restore and forks", () => {
+  const workspace = new PersistentWorkspace("workspace_test");
+  workspace.join({ id: "human_test", kind: "human" });
+  workspace.join({ id: "agent_test", kind: "agent" });
+  workspace.join({ id: "subagent_test", kind: "subagent", parentAgentId: "agent_test" });
+  workspace.apply("human_test", "set-file", { path: "README.md" }, (state) => ({ ...state, file: "v1" }));
+  const snapshot = workspace.snapshot();
+  workspace.apply("agent_test", "edit-file", { path: "README.md" }, (state) => ({ ...state, file: "v2" }));
+  assert.equal(workspace.view().state.file, "v2");
+  workspace.restore(snapshot.id);
+  assert.equal(workspace.view().state.file, "v1");
+  const fork = workspace.fork(snapshot.id, "workspace_fork");
+  assert.equal(fork.view().state.file, "v1");
+  assert.equal(fork.view().participants.length, 3);
 });
