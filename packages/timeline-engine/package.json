@@ -5,6 +5,16 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./persistent-workspace": {
+      "types": "./dist/persistent-workspace.d.ts",
+      "import": "./dist/persistent-workspace.js"
+    }
+  },
   "dependencies": {
     "@sessions/shared": "workspace:*"
   }
