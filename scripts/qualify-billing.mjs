@@ -79,6 +79,7 @@ await new Promise((resolve, reject) => {
 });
 
 try {
+  const entitlementBeforeCheckout = psql("select plan_key || ':' || status || ':' || source from workspace_entitlements where workspace_id='workspace_billing_qualification'");
   const checkout = await api("/api/billing/checkout", { method: "POST", body: JSON.stringify({ planKey: "developer" }) });
   assert(checkout.body.url === "https://checkout.stripe.invalid/cs_qualification", "checkout URL was not returned");
   assert(stripeCalls[0]?.body.includes("mode=subscription"), "Checkout was not created in subscription mode");
@@ -95,7 +96,7 @@ try {
   assert((await webhook(checkoutEvent)).result === "duplicate", "duplicate Stripe event was not deduplicated");
   assert(psql("select external_customer_ref from billing_accounts where workspace_id='workspace_billing_qualification'") === "cus_qualification", "checkout did not link Stripe customer identity");
   assert(psql("select count(*) from subscriptions where external_subscription_ref='sub_qualification'") === "0", "checkout session was incorrectly persisted as an authoritative subscription");
-  assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") !== "active", "checkout completion incorrectly granted paid entitlement");
+  assert(psql("select plan_key || ':' || status || ':' || source from workspace_entitlements where workspace_id='workspace_billing_qualification'") === entitlementBeforeCheckout, "checkout completion changed entitlement authority");
 
   await webhook({
     id: "evt_subscription_qualification",
@@ -113,6 +114,8 @@ try {
     } },
   });
   assert(psql("select status from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "active", "authoritative subscription event did not activate entitlement");
+  assert(psql("select plan_key from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "developer", "authoritative subscription event did not establish the paid plan");
+  assert(psql("select source from workspace_entitlements where workspace_id='workspace_billing_qualification'") === "stripe", "authoritative subscription event did not establish Stripe entitlement authority");
   assert(psql("select status from subscriptions where external_subscription_ref='sub_qualification'") === "active", "authoritative subscription row was not persisted");
 
   await webhook({ id: "evt_failed_qualification", type: "invoice.payment_failed", created: 1_800_000_300, livemode: false, data: { object: { id: "in_failed", customer: "cus_qualification", subscription: "sub_qualification" } } });
@@ -157,7 +160,7 @@ try {
   assert(psql("select status from data_export_requests where workspace_id='workspace_billing_qualification' order by requested_at desc limit 1") === "ready", "export request did not reach ready state");
   assert(Number(psql("select count(*) from audit_events where workspace_id='workspace_billing_qualification' and outcome='denied'")) >= 2, "billing-suspended API denials were not audited");
 
-  console.log(JSON.stringify({ qualification: "billing-control-plane", passed: true, stripeEvents: 5, checkoutDoesNotGrantEntitlement: true, authoritativeSubscriptionActivation: true, duplicateSafety: true, outOfOrderSafety: true, entitlementRecovery: true, apiPaymentResponse: 402, export: true, cancellation: true }, null, 2));
+  console.log(JSON.stringify({ qualification: "billing-control-plane", passed: true, stripeEvents: 5, checkoutDoesNotChangeEntitlementAuthority: true, authoritativeSubscriptionActivation: true, duplicateSafety: true, outOfOrderSafety: true, entitlementRecovery: true, apiPaymentResponse: 402, export: true, cancellation: true }, null, 2));
 } finally {
   await new Promise((resolve) => stripeMock.close(resolve));
 }
