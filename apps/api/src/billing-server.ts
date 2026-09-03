@@ -10,6 +10,7 @@ const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
 const publicOrigin = process.env.SESSIONS_PUBLIC_ORIGIN ?? "http://localhost:3000";
 const maxBody = Number(process.env.SESSIONS_MAX_BODY_BYTES ?? 1_048_576);
 const pool = new Pool({ connectionString: databaseUrl, max: Number(process.env.SESSIONS_DB_POOL_MAX ?? 10) });
+const PAID_PLAN_KEYS = new Set(["developer", "team", "business", "enterprise"]);
 
 class HttpError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
@@ -46,6 +47,10 @@ function tokenHash(token: string) { return createHash("sha256").update(token).di
 function hasScope(identity: Identity, scope: string) { return identity.scopes.includes("*") || identity.scopes.includes(scope); }
 function requireScope(identity: Identity, scope: string) { if (!hasScope(identity, scope)) throw new HttpError(403, `missing scope: ${scope}`); }
 function stripeEventTime(event: StripeEvent) { return new Date((event.created ?? Math.floor(Date.now() / 1000)) * 1000); }
+function requirePaidPlanKey(planKey: string | null): string {
+  if (!planKey || !PAID_PLAN_KEYS.has(planKey)) throw new HttpError(400, "Stripe event is missing a valid Sessions plan identity");
+  return planKey;
+}
 
 async function authenticate(req: http.IncomingMessage): Promise<Identity> {
   const auth = req.headers.authorization;
@@ -101,7 +106,7 @@ async function resolveWorkspace(db: Db, object: any) {
     const found = await db.query("select workspace_id,plan_key from billing_accounts where external_customer_ref=$1 limit 1", [customerId]);
     if (found.rowCount) { workspaceId = found.rows[0].workspace_id; planKey ??= found.rows[0].plan_key; }
   }
-  return { workspaceId, planKey: planKey ?? "developer", subscriptionId, customerId };
+  return { workspaceId, planKey, subscriptionId, customerId };
 }
 
 async function upsertSubscription(db: Db, accountId: string, planKey: string, subscriptionId: string, object: any, eventType: string, eventCreatedAt: Date) {
@@ -144,29 +149,45 @@ async function reconcileStripeEvent(db: Db, event: StripeEvent) {
   if (!workspaceId) return;
   const account = await billingAccount(db, workspaceId);
 
-  if (subscriptionId && (object.id?.startsWith?.("sub_") || event.type === "checkout.session.completed")) {
-    await upsertSubscription(db, account.id, planKey, subscriptionId, object, event.type, eventCreatedAt);
+  if (event.type === "checkout.session.completed") {
+    const ownedPlanKey = requirePaidPlanKey(planKey);
+    await updateBillingState(db, account.id, eventCreatedAt, { customerId, planKey: ownedPlanKey });
+    return;
+  }
+
+  const entitlementEvent = [
+    "invoice.payment_failed",
+    "invoice.paid",
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "customer.subscription.deleted",
+  ].includes(event.type);
+  if (!entitlementEvent) return;
+  const ownedPlanKey = requirePaidPlanKey(planKey);
+
+  if (subscriptionId && String(event.type).startsWith("customer.subscription.")) {
+    await upsertSubscription(db, account.id, ownedPlanKey, subscriptionId, object, event.type, eventCreatedAt);
   }
 
   if (event.type === "invoice.payment_failed") {
     await updateBillingState(db, account.id, eventCreatedAt, { customerId, paymentState: "failed", status: "past_due" });
-    await setEntitlement(db, workspaceId, planKey, "payment_failed", event.type, eventCreatedAt);
+    await setEntitlement(db, workspaceId, ownedPlanKey, "payment_failed", event.type, eventCreatedAt);
     return;
   }
 
   if (event.type === "customer.subscription.deleted") {
     await updateBillingState(db, account.id, eventCreatedAt, { customerId, status: "canceled" });
-    await setEntitlement(db, workspaceId, planKey, "canceled", event.type, eventCreatedAt);
+    await setEntitlement(db, workspaceId, ownedPlanKey, "canceled", event.type, eventCreatedAt);
     return;
   }
 
-  if (["invoice.paid", "checkout.session.completed", "customer.subscription.created", "customer.subscription.updated"].includes(event.type)) {
-    const sourceStatus = object.status ?? "active";
-    const entitlementStatus = ["active", "trialing", "complete", "paid"].includes(sourceStatus)
+  if (["invoice.paid", "customer.subscription.created", "customer.subscription.updated"].includes(event.type)) {
+    const sourceStatus = object.status ?? (event.type === "invoice.paid" ? "paid" : "unknown");
+    const entitlementStatus = ["active", "trialing", "paid"].includes(sourceStatus)
       ? "active"
       : sourceStatus === "past_due" ? "payment_failed" : "suspended";
-    await updateBillingState(db, account.id, eventCreatedAt, { customerId, planKey, paymentState: entitlementStatus === "active" ? "ok" : "failed", status: sourceStatus });
-    await setEntitlement(db, workspaceId, planKey, entitlementStatus, event.type, eventCreatedAt);
+    await updateBillingState(db, account.id, eventCreatedAt, { customerId, planKey: ownedPlanKey, paymentState: entitlementStatus === "active" ? "ok" : "failed", status: sourceStatus });
+    await setEntitlement(db, workspaceId, ownedPlanKey, entitlementStatus, event.type, eventCreatedAt);
   }
 }
 
