@@ -16,6 +16,7 @@ const requiredFiles = [
   'scripts/qualify-postgres.sh',
   'scripts/qualify-webhook-outbox.sh',
   'scripts/qualify-release-governance.sh',
+  'scripts/qualify-native-webhooks.sh',
   'scripts/qualify-team-auth.mjs',
   'scripts/qualify-tenancy.mjs',
   'scripts/validate-production-config.sh',
@@ -59,6 +60,7 @@ const requiredMigrations = [
   'infrastructure/postgres/018-protected-branch-governance.sql',
   'infrastructure/postgres/019-webhook-outbox.sql',
   'infrastructure/postgres/020-release-deployment-governance.sql',
+  'infrastructure/postgres/021-native-repository-webhook-events.sql',
 ];
 
 const productionEnvKeys = [
@@ -82,7 +84,7 @@ async function main() {
   for (const key of productionEnvKeys) if (!new RegExp(`^${key}=`, 'm').test(envTemplate)) throw new Error(`Production environment contract missing ${key}`);
   const compose = await readFile('docker-compose.production.yml', 'utf8');
   for (const service of productionServices) if (!new RegExp(`^\\s{2}${service}:`, 'm').test(compose)) throw new Error(`Production topology missing service: ${service}`);
-  for (const invariant of ['DATABASE_URL: postgresql://${POSTGRES_USER','SESSIONS_PUBLIC_ORIGIN: https://${SESSIONS_DOMAIN}','STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:','STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:','SESSIONS_ALLOW_INSECURE_LOCAL: "false"','SESSIONS_WEBHOOK_MASTER_KEY: ${SESSIONS_WEBHOOK_MASTER_KEY:','SESSIONS_ALLOW_INSECURE_WEBHOOKS: "false"','019-webhook-outbox.sql:/docker-entrypoint-initdb.d/019-webhook-outbox.sql:ro','020-release-deployment-governance.sql:/docker-entrypoint-initdb.d/020-release-deployment-governance.sql:ro']) {
+  for (const invariant of ['DATABASE_URL: postgresql://${POSTGRES_USER','SESSIONS_PUBLIC_ORIGIN: https://${SESSIONS_DOMAIN}','STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:','STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:','SESSIONS_ALLOW_INSECURE_LOCAL: "false"','SESSIONS_WEBHOOK_MASTER_KEY: ${SESSIONS_WEBHOOK_MASTER_KEY:','SESSIONS_ALLOW_INSECURE_WEBHOOKS: "false"','019-webhook-outbox.sql:/docker-entrypoint-initdb.d/019-webhook-outbox.sql:ro','020-release-deployment-governance.sql:/docker-entrypoint-initdb.d/020-release-deployment-governance.sql:ro','021-native-repository-webhook-events.sql:/docker-entrypoint-initdb.d/021-native-repository-webhook-events.sql:ro']) {
     if (!compose.includes(invariant)) throw new Error(`Production topology invariant missing: ${invariant}`);
   }
   const billing = await readFile('apps/api/src/billing-server.ts', 'utf8');
@@ -97,6 +99,8 @@ async function main() {
   for (const invariant of ['x-sessions-signature-256','createHmac','lease_expires_at','maxAttempts','assertSafeWebhookUrl']) if (!webhookWorker.includes(invariant)) throw new Error(`Webhook delivery invariant missing: ${invariant}`);
   const webhookCrypto = await readFile('apps/api/src/webhook-crypto.ts', 'utf8');
   for (const invariant of ['aes-256-gcm','SESSIONS_WEBHOOK_MASTER_KEY','private or reserved address']) if (!webhookCrypto.includes(invariant)) throw new Error(`Webhook security invariant missing: ${invariant}`);
+  const nativeWebhook = await readFile('infrastructure/postgres/021-native-repository-webhook-events.sql', 'utf8');
+  for (const invariant of ['checkpoint.insert','sessions_repository_refs','webhook_deliveries']) if (!nativeWebhook.includes(invariant)) throw new Error(`Native repository integration-event invariant missing: ${invariant}`);
   console.log(JSON.stringify({
     status: 'internally-launch-ready-structure',
     checkedAt: new Date().toISOString(),
