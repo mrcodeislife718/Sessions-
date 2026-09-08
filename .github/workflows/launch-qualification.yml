@@ -52,6 +52,8 @@ jobs:
         run: bash scripts/qualify-webhook-outbox.sh
       - name: Qualify release and protected deployment governance
         run: bash scripts/qualify-release-governance.sh
+      - name: Qualify native repository integration events
+        run: bash scripts/qualify-native-webhooks.sh
 
   commercial-proof-contract:
     runs-on: ubuntu-latest
