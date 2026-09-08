@@ -14,12 +14,15 @@ const requiredFiles = [
   'scripts/qualify-lifecycle.mjs',
   'scripts/qualify-native-collaboration.mjs',
   'scripts/qualify-postgres.sh',
+  'scripts/qualify-webhook-outbox.sh',
+  'scripts/qualify-release-governance.sh',
   'scripts/qualify-team-auth.mjs',
   'scripts/qualify-tenancy.mjs',
   'scripts/validate-production-config.sh',
   'apps/api/src/auth-server.ts',
   'apps/api/src/billing-server.ts',
   'apps/api/src/repository-server.ts',
+  'apps/api/src/release-governance.ts',
   'apps/api/src/workflow-server.ts',
   'apps/api/src/webhook-server.ts',
   'apps/api/src/webhook-worker.ts',
@@ -55,6 +58,7 @@ const requiredMigrations = [
   'infrastructure/postgres/017-causal-traversal-indexes.sql',
   'infrastructure/postgres/018-protected-branch-governance.sql',
   'infrastructure/postgres/019-webhook-outbox.sql',
+  'infrastructure/postgres/020-release-deployment-governance.sql',
 ];
 
 const productionEnvKeys = [
@@ -78,13 +82,17 @@ async function main() {
   for (const key of productionEnvKeys) if (!new RegExp(`^${key}=`, 'm').test(envTemplate)) throw new Error(`Production environment contract missing ${key}`);
   const compose = await readFile('docker-compose.production.yml', 'utf8');
   for (const service of productionServices) if (!new RegExp(`^\\s{2}${service}:`, 'm').test(compose)) throw new Error(`Production topology missing service: ${service}`);
-  for (const invariant of ['DATABASE_URL: postgresql://${POSTGRES_USER','SESSIONS_PUBLIC_ORIGIN: https://${SESSIONS_DOMAIN}','STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:','STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:','SESSIONS_ALLOW_INSECURE_LOCAL: "false"','SESSIONS_WEBHOOK_MASTER_KEY: ${SESSIONS_WEBHOOK_MASTER_KEY:','SESSIONS_ALLOW_INSECURE_WEBHOOKS: "false"','019-webhook-outbox.sql:/docker-entrypoint-initdb.d/019-webhook-outbox.sql:ro']) {
+  for (const invariant of ['DATABASE_URL: postgresql://${POSTGRES_USER','SESSIONS_PUBLIC_ORIGIN: https://${SESSIONS_DOMAIN}','STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:','STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:','SESSIONS_ALLOW_INSECURE_LOCAL: "false"','SESSIONS_WEBHOOK_MASTER_KEY: ${SESSIONS_WEBHOOK_MASTER_KEY:','SESSIONS_ALLOW_INSECURE_WEBHOOKS: "false"','019-webhook-outbox.sql:/docker-entrypoint-initdb.d/019-webhook-outbox.sql:ro','020-release-deployment-governance.sql:/docker-entrypoint-initdb.d/020-release-deployment-governance.sql:ro']) {
     if (!compose.includes(invariant)) throw new Error(`Production topology invariant missing: ${invariant}`);
   }
   const billing = await readFile('apps/api/src/billing-server.ts', 'utf8');
   for (const invariant of ['verifyStripeSignature','usage_events','workspace_entitlements','api_credentials']) if (!billing.includes(invariant)) throw new Error(`Billing/entitlement invariant missing: ${invariant}`);
   const repositoryServer = await readFile('apps/api/src/repository-server.ts', 'utf8');
-  for (const invariant of ['repository_branch_policies','requiredHumanApprovals','branch-policies']) if (!repositoryServer.includes(invariant)) throw new Error(`Repository governance invariant missing: ${invariant}`);
+  for (const invariant of ['repository_branch_policies','requiredHumanApprovals','branch-policies','handleReleaseGovernance']) if (!repositoryServer.includes(invariant)) throw new Error(`Repository governance invariant missing: ${invariant}`);
+  const releaseGovernance = await readFile('apps/api/src/release-governance.ts', 'utf8');
+  for (const invariant of ['environment-policies','deployment_approvals','requiredHumanApprovals','restrictAiDeploy']) if (!releaseGovernance.includes(invariant)) throw new Error(`Release/deployment governance invariant missing: ${invariant}`);
+  const caddy = await readFile('infrastructure/docker/Caddyfile', 'utf8');
+  for (const invariant of ['branch-policies','environment-policies','deployments/[^/]+/(approvals|status)']) if (!caddy.includes(invariant)) throw new Error(`Repository governance route missing: ${invariant}`);
   const webhookWorker = await readFile('apps/api/src/webhook-worker.ts', 'utf8');
   for (const invariant of ['x-sessions-signature-256','createHmac','lease_expires_at','maxAttempts','assertSafeWebhookUrl']) if (!webhookWorker.includes(invariant)) throw new Error(`Webhook delivery invariant missing: ${invariant}`);
   const webhookCrypto = await readFile('apps/api/src/webhook-crypto.ts', 'utf8');
