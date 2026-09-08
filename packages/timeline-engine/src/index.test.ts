@@ -48,7 +48,7 @@ test("persistent workspace supports multiplayer authorship, snapshots, restore a
   assert.equal(workspace.view().state.file, "v2");
   workspace.restore(snapshot.id);
   assert.equal(workspace.view().state.file, "v1");
-  const fork = workspace.fork(snapshot.id, "workspace_fork");
+  const fork = workspace.fork(snapshot.id, "11111111-1111-4111-8111-111111111111");
   assert.equal(fork.view().state.file, "v1");
   assert.equal(fork.view().participants.length, 3);
 });
