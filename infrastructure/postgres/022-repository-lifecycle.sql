@@ -26,6 +26,10 @@ declare
   repository_value text;
   lifecycle text;
 begin
+  if current_setting('sessions.lifecycle_purge',true)='on' then
+    if tg_op='DELETE' then return old; end if;
+    return new;
+  end if;
   if tg_op='DELETE' then repository_value:=old.repository_id; else repository_value:=new.repository_id; end if;
   select lifecycle_status into lifecycle from hosted_repositories where id=repository_value;
   if lifecycle is null then raise exception 'repository does not exist' using errcode='23503'; end if;
@@ -35,8 +39,8 @@ begin
 end;
 $$ language plpgsql;
 
--- These are the user-visible/state-changing forge and native-source surfaces. Lifecycle
--- administration updates hosted_repositories itself and therefore remains possible.
+-- User-visible/state-changing forge, source, object and manifest surfaces all become
+-- read-only when a repository is archived or awaiting deletion.
 drop trigger if exists trg_sessions_active_repo_issues on repository_issues;
 create trigger trg_sessions_active_repo_issues before insert or update or delete on repository_issues for each row execute function sessions_require_active_repository_write();
 drop trigger if exists trg_sessions_active_repo_pulls on pull_requests;
@@ -51,7 +55,13 @@ drop trigger if exists trg_sessions_active_repo_refs on sessions_repository_refs
 create trigger trg_sessions_active_repo_refs before insert or update or delete on sessions_repository_refs for each row execute function sessions_require_active_repository_write();
 drop trigger if exists trg_sessions_active_repo_checkpoints on sessions_repository_checkpoints;
 create trigger trg_sessions_active_repo_checkpoints before insert or update or delete on sessions_repository_checkpoints for each row execute function sessions_require_active_repository_write();
+drop trigger if exists trg_sessions_active_repo_objects on sessions_repository_objects;
+create trigger trg_sessions_active_repo_objects before insert or update or delete on sessions_repository_objects for each row execute function sessions_require_active_repository_write();
 drop trigger if exists trg_sessions_active_repo_state on sessions_repository_states;
 create trigger trg_sessions_active_repo_state before insert or update or delete on sessions_repository_states for each row execute function sessions_require_active_repository_write();
+drop trigger if exists trg_sessions_active_repo_legacy_objects on repository_objects;
+create trigger trg_sessions_active_repo_legacy_objects before insert or update or delete on repository_objects for each row execute function sessions_require_active_repository_write();
+drop trigger if exists trg_sessions_active_repo_manifests on repository_manifests;
+create trigger trg_sessions_active_repo_manifests before insert or update or delete on repository_manifests for each row execute function sessions_require_active_repository_write();
 
 commit;
