@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 : "${DATABASE_URL:=postgresql://sessions:sessions@localhost:5432/sessions}"
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infrastructure/postgres/022-repository-lifecycle.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 delete from hosted_repositories where id='repo_lifecycle_qualification';
 insert into hosted_repositories(id,workspace_id,name,visibility) values('repo_lifecycle_qualification','workspace_qualification','lifecycle-qualification','private');
@@ -38,4 +37,4 @@ BEGIN
   IF exists(select 1 from hosted_repositories where id='repo_lifecycle_qualification') THEN RAISE EXCEPTION 'repository purge bypass assertion failed'; END IF;
 END $$;
 SQL
-printf 'Repository lifecycle qualification passed: active writes, archive read-only state, restore, deletion quarantine and controlled purge bypass verified.\n'
+printf 'Repository lifecycle qualification passed against current canonical schema: active writes, archive read-only state, restore, deletion quarantine and controlled purge bypass verified.\n'
