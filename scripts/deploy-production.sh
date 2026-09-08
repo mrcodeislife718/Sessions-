@@ -30,31 +30,9 @@ echo "[sessions] building Sessions release $release_id"
 echo "[sessions] starting data services"
 "${compose[@]}" up -d postgres redis minio
 
-migrations=(
-  infrastructure/postgres/init.sql
-  infrastructure/postgres/002-hosted-repositories.sql
-  infrastructure/postgres/003-source-storage.sql
-  infrastructure/postgres/004-production-controls.sql
-  infrastructure/postgres/005-commercial-operations.sql
-  infrastructure/postgres/006-product-analytics.sql
-  infrastructure/postgres/007-billing-integrations.sql
-  infrastructure/postgres/008-repository-collaboration.sql
-  infrastructure/postgres/009-lifecycle-evidence-events.sql
-  infrastructure/postgres/010-hosted-auth.sql
-  infrastructure/postgres/011-repository-onboarding.sql
-  infrastructure/postgres/012-sessions-native-repository.sql
-  infrastructure/postgres/013-team-invitations.sql
-  infrastructure/postgres/014-action-workflows.sql
-  infrastructure/postgres/015-reasoning-graph.sql
-  infrastructure/postgres/016-execution-lineage-indexes.sql
-  infrastructure/postgres/017-causal-traversal-indexes.sql
-  infrastructure/postgres/018-protected-branch-governance.sql
-  infrastructure/postgres/019-webhook-outbox.sql
-  infrastructure/postgres/020-release-deployment-governance.sql
-  infrastructure/postgres/021-native-repository-webhook-events.sql
-)
+mapfile -t migrations < <(bash scripts/list-migrations.sh)
 for migration in "${migrations[@]}"; do
-  echo "[sessions] applying $migration"
+  echo "[sessions] applying ${migration#$PWD/}"
   "${compose[@]}" exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 < "$migration"
 done
 
