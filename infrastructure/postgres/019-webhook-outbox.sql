@@ -78,10 +78,7 @@ begin
 end;
 $$ language plpgsql;
 
-foreach table_name in array array['repository_issues','pull_requests','action_runs','repository_releases','repository_deployments'] loop
-end loop;
-
--- PostgreSQL does not support dynamic CREATE TRIGGER in plain DDL, keep explicit triggers auditable.
+-- Explicit triggers keep the event surface reviewable and transactionally bind delivery creation to state changes.
 drop trigger if exists trg_sessions_webhook_repository_issues on repository_issues;
 create trigger trg_sessions_webhook_repository_issues after insert or update or delete on repository_issues for each row execute function sessions_enqueue_webhook_event();
 drop trigger if exists trg_sessions_webhook_pull_requests on pull_requests;
