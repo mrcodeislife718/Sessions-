@@ -12,10 +12,6 @@ trap 'rm -rf "$backup_dir"' EXIT
 
 server_major="$(psql "$DATABASE_URL" -Atc "show server_version_num" | awk '{print int($1/10000)}')"
 
-run_pg17(){
-  docker run --rm --network host "$@"
-}
-
 echo "[sessions-current-recovery] dumping current schema/data from $source_db (Postgres $server_major)"
 if command -v pg_dump >/dev/null 2>&1 && [[ "$(pg_dump --version | awk '{print $NF}' | cut -d. -f1)" == "$server_major" ]]; then
   pg_dump "$DATABASE_URL" --format=custom --file="$backup"
@@ -47,6 +43,8 @@ BEGIN
   IF to_regclass('public.repository_lifecycle_events') is null THEN RAISE EXCEPTION 'restored lifecycle schema missing'; END IF;
   IF to_regclass('public.repository_artifacts') is null OR to_regclass('public.artifact_attestations') is null THEN RAISE EXCEPTION 'restored supply-chain schema missing'; END IF;
   IF to_regclass('public.principal_signing_keys') is null THEN RAISE EXCEPTION 'restored signing-key schema missing'; END IF;
+  IF to_regclass('public.organization_security_policies') is null THEN RAISE EXCEPTION 'restored organization security policy schema missing'; END IF;
+  IF to_regprocedure('public.sessions_enforce_branch_policy_floor()') is null OR to_regprocedure('public.sessions_enforce_environment_policy_floor()') is null THEN RAISE EXCEPTION 'restored organization policy enforcement functions missing'; END IF;
   IF (select count(*) from hosted_repositories where id='repo_qualification')<>1 THEN RAISE EXCEPTION 'restored qualification repository missing'; END IF;
   IF (select count(*) from repository_branch_policies where repository_id='repo_qualification' and branch_name='main')<1 THEN RAISE EXCEPTION 'restored protected branch policy data missing'; END IF;
   IF (select count(*) from repository_environment_policies where repository_id='repo_qualification')<1 THEN RAISE EXCEPTION 'restored environment policy data missing'; END IF;
@@ -56,4 +54,4 @@ BEGIN
 END $$;
 SQL
 
-printf 'Current-schema recovery qualification passed: full dump/restore retained governance, integrations, lifecycle and supply-chain evidence in %s.\n' "$restore_db"
+printf 'Current-schema recovery qualification passed: full dump/restore retained governance, organization policy, integrations, lifecycle and supply-chain evidence in %s.\n' "$restore_db"
