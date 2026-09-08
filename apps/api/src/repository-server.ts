@@ -1,6 +1,6 @@
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
-import { Pool, type PoolClient } from "pg";
+import { Pool } from "pg";
 
 const port = Number(process.env.REPOSITORY_PORT ?? 4300);
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://sessions:sessions@localhost:5432/sessions";
@@ -36,6 +36,12 @@ async function requireActiveEntitlement(identity: Identity) {
   if (status !== "active") throw new HttpError(402, "activate a paid Sessions plan before adding hosted repositories");
 }
 
+async function requireRepository(identity: Identity, repositoryId: string) {
+  const result = await pool.query("select * from hosted_repositories where id=$1 and workspace_id=$2", [repositoryId, identity.workspaceId]);
+  if (!result.rowCount) throw new HttpError(404, "repository not found");
+  return result.rows[0];
+}
+
 async function upsertRepository(identity: Identity, body: any) {
   requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity);
   const id = String(body.repositoryId ?? "").trim(), name = String(body.name ?? "").trim();
@@ -49,9 +55,7 @@ async function upsertRepository(identity: Identity, body: any) {
 }
 
 async function ingestGitImport(identity: Identity, repositoryId: string, body: any) {
-  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity);
-  const repo = await pool.query("select id from hosted_repositories where id=$1 and workspace_id=$2", [repositoryId, identity.workspaceId]);
-  if (!repo.rowCount) throw new HttpError(404, "repository not found");
+  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); await requireRepository(identity, repositoryId);
   const commits = Array.isArray(body.commits) ? body.commits.slice(0, 100000) : [];
   const branches = Array.isArray(body.branches) ? body.branches.slice(0, 10000) : [];
   const tags = Array.isArray(body.tags) ? body.tags.slice(0, 10000) : [];
@@ -74,6 +78,32 @@ async function ingestGitImport(identity: Identity, repositoryId: string, body: a
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
 }
 
+async function listBranchPolicies(identity: Identity, repositoryId: string) {
+  requireScope(identity, "sessions:read"); await requireRepository(identity, repositoryId);
+  const result = await pool.query("select * from repository_branch_policies where workspace_id=$1 and repository_id=$2 order by branch_name", [identity.workspaceId, repositoryId]);
+  return result.rows;
+}
+
+async function upsertBranchPolicy(identity: Identity, repositoryId: string, body: any) {
+  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); await requireRepository(identity, repositoryId);
+  const branchName = String(body.branchName ?? "").trim();
+  if (!branchName || branchName.length > 255 || /[\u0000-\u001f]/.test(branchName)) throw new HttpError(400, "valid branchName is required");
+  const requiredApprovals = Number(body.requiredApprovals ?? 1);
+  const requiredHumanApprovals = Number(body.requiredHumanApprovals ?? 0);
+  if (!Number.isInteger(requiredApprovals) || requiredApprovals < 0 || requiredApprovals > 100) throw new HttpError(400, "requiredApprovals must be an integer from 0 to 100");
+  if (!Number.isInteger(requiredHumanApprovals) || requiredHumanApprovals < 0 || requiredHumanApprovals > requiredApprovals) throw new HttpError(400, "requiredHumanApprovals must be between 0 and requiredApprovals");
+  const result = await pool.query(`insert into repository_branch_policies(workspace_id,repository_id,branch_name,required_approvals,required_human_approvals,require_independent_approval,require_verification,require_actions_success,block_changes_requested,restrict_ai_merge,created_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict(repository_id,branch_name) do update set required_approvals=excluded.required_approvals,required_human_approvals=excluded.required_human_approvals,require_independent_approval=excluded.require_independent_approval,require_verification=excluded.require_verification,require_actions_success=excluded.require_actions_success,block_changes_requested=excluded.block_changes_requested,restrict_ai_merge=excluded.restrict_ai_merge,updated_at=now() returning *`, [identity.workspaceId, repositoryId, branchName, requiredApprovals, requiredHumanApprovals, body.requireIndependentApproval !== false, body.requireVerification !== false, body.requireActionsSuccess !== false, body.blockChangesRequested !== false, body.restrictAiMerge === true, identity.principalId]);
+  await pool.query("insert into product_events(id,workspace_id,principal_id,event_name,repository_id,properties) values($1,$2,$3,'branch_policy_updated',$4,$5)", [`product_${randomUUID()}`, identity.workspaceId, identity.principalId, repositoryId, JSON.stringify({ branchName, requiredApprovals, requiredHumanApprovals })]);
+  return result.rows[0];
+}
+
+async function deleteBranchPolicy(identity: Identity, repositoryId: string, branchName: string) {
+  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); await requireRepository(identity, repositoryId);
+  const result = await pool.query("delete from repository_branch_policies where workspace_id=$1 and repository_id=$2 and branch_name=$3 returning branch_name", [identity.workspaceId, repositoryId, branchName]);
+  if (!result.rowCount) throw new HttpError(404, "branch policy not found");
+  return { repositoryId, branchName, deleted: true };
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -81,8 +111,13 @@ const server = http.createServer(async (req, res) => {
     const identity = await authenticate(req);
     if (req.method === "GET" && url.pathname === "/api/repositories") { requireScope(identity, "sessions:read"); const result = await pool.query("select * from hosted_repositories where workspace_id=$1 order by updated_at desc", [identity.workspaceId]); return send(res, 200, result.rows); }
     if (req.method === "POST" && url.pathname === "/api/repositories") return send(res, 201, await upsertRepository(identity, await jsonBody(req)));
-    const match = url.pathname.match(/^\/api\/repositories\/([^/]+)\/git-import$/);
-    if (req.method === "POST" && match) return send(res, 201, await ingestGitImport(identity, decodeURIComponent(match[1]), await jsonBody(req)));
+    const gitImport = url.pathname.match(/^\/api\/repositories\/([^/]+)\/git-import$/);
+    if (req.method === "POST" && gitImport) return send(res, 201, await ingestGitImport(identity, decodeURIComponent(gitImport[1]), await jsonBody(req)));
+    const policies = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branch-policies$/);
+    if (policies && req.method === "GET") return send(res, 200, await listBranchPolicies(identity, decodeURIComponent(policies[1])));
+    if (policies && req.method === "PUT") return send(res, 200, await upsertBranchPolicy(identity, decodeURIComponent(policies[1]), await jsonBody(req)));
+    const policy = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branch-policies\/([^/]+)$/);
+    if (policy && req.method === "DELETE") return send(res, 200, await deleteBranchPolicy(identity, decodeURIComponent(policy[1]), decodeURIComponent(policy[2])));
     throw new HttpError(404, "not found");
   } catch (error) { const status = error instanceof HttpError ? error.status : 500; const message = error instanceof Error ? error.message : "internal error"; return send(res, status, { error: status >= 500 ? "internal error" : message }); }
 });
