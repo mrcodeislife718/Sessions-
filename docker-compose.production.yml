@@ -311,6 +311,7 @@ services:
       - ./infrastructure/postgres/017-causal-traversal-indexes.sql:/docker-entrypoint-initdb.d/017-causal-traversal-indexes.sql:ro
       - ./infrastructure/postgres/018-protected-branch-governance.sql:/docker-entrypoint-initdb.d/018-protected-branch-governance.sql:ro
       - ./infrastructure/postgres/019-webhook-outbox.sql:/docker-entrypoint-initdb.d/019-webhook-outbox.sql:ro
+      - ./infrastructure/postgres/020-release-deployment-governance.sql:/docker-entrypoint-initdb.d/020-release-deployment-governance.sql:ro
     networks: [data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
