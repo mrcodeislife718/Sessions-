@@ -46,8 +46,8 @@ jobs:
       PGPASSWORD: sessions
     steps:
       - uses: actions/checkout@v4
-      - name: Qualify production Postgres, migration and recovery path
-        run: bash scripts/qualify-postgres.sh
+      - name: Qualify current Postgres and recovery path
+        run: bash scripts/qualify-current-postgres.sh
       - name: Qualify transactional webhook outbox
         run: bash scripts/qualify-webhook-outbox.sh
       - name: Qualify release and protected deployment governance
