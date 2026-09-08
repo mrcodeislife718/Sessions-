@@ -15,6 +15,11 @@
     reverse_proxy auth:4200
   }
 
+  @organizationSecurity path /api/organization/security-policy
+  handle @organizationSecurity {
+    reverse_proxy repositories:4300
+  }
+
   # Repository administration and legacy migration are isolated behind the
   # repository control service. Normal native repository data paths remain on
   # the first-party Sessions API.
