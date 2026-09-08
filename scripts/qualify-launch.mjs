@@ -29,6 +29,7 @@ const requiredFiles = [
   'apps/api/src/auth-server.ts',
   'apps/api/src/billing-server.ts',
   'apps/api/src/repository-server.ts',
+  'apps/api/src/organization-security.ts',
   'apps/api/src/release-governance.ts',
   'apps/api/src/repository-lifecycle.ts',
   'apps/api/src/supply-chain.ts',
@@ -81,7 +82,9 @@ async function main() {
   const billing = await readFile('apps/api/src/billing-server.ts', 'utf8');
   for (const invariant of ['verifyStripeSignature','usage_events','workspace_entitlements','api_credentials']) if (!billing.includes(invariant)) throw new Error(`Billing/entitlement invariant missing: ${invariant}`);
   const repositoryServer = await readFile('apps/api/src/repository-server.ts', 'utf8');
-  for (const invariant of ['repository_branch_policies','requiredHumanApprovals','branch-policies','handleReleaseGovernance','handleRepositoryLifecycle','handleSupplyChain']) if (!repositoryServer.includes(invariant)) throw new Error(`Repository governance invariant missing: ${invariant}`);
+  for (const invariant of ['repository_branch_policies','requiredHumanApprovals','branch-policies','handleOrganizationSecurity','handleReleaseGovernance','handleRepositoryLifecycle','handleSupplyChain']) if (!repositoryServer.includes(invariant)) throw new Error(`Repository governance invariant missing: ${invariant}`);
+  const organizationSecurity = await readFile('apps/api/src/organization-security.ts', 'utf8');
+  for (const invariant of ['organization_security_policies','requireEnterpriseHumanAdmin','active Enterprise entitlement','organization.security_policy.update']) if (!organizationSecurity.includes(invariant)) throw new Error(`Organization security invariant missing: ${invariant}`);
   const releaseGovernance = await readFile('apps/api/src/release-governance.ts', 'utf8');
   for (const invariant of ['environment-policies','deployment_approvals','requiredHumanApprovals','restrictAiDeploy','requireAttestedArtifact','requireSbom']) if (!releaseGovernance.includes(invariant)) throw new Error(`Release/deployment governance invariant missing: ${invariant}`);
   const lifecycle = await readFile('apps/api/src/repository-lifecycle.ts', 'utf8');
@@ -89,7 +92,7 @@ async function main() {
   const supplyChain = await readFile('apps/api/src/supply-chain.ts', 'utf8');
   for (const invariant of ['principal_signing_keys','repository_artifacts','artifact_attestations','Ed25519','signature verification failed','subject digest does not match artifact','repository does not match artifact','repository is read-only']) if (!supplyChain.includes(invariant)) throw new Error(`Supply-chain invariant missing: ${invariant}`);
   const caddy = await readFile('infrastructure/docker/Caddyfile', 'utf8');
-  for (const invariant of ['lifecycle','branch-policies','environment-policies','deployments/[^/]+/(approvals|status)','signing-keys','artifacts']) if (!caddy.includes(invariant)) throw new Error(`Repository governance route missing: ${invariant}`);
+  for (const invariant of ['/api/organization/security-policy','lifecycle','branch-policies','environment-policies','deployments/[^/]+/(approvals|status)','signing-keys','artifacts']) if (!caddy.includes(invariant)) throw new Error(`Repository governance route missing: ${invariant}`);
   const webhookWorker = await readFile('apps/api/src/webhook-worker.ts', 'utf8');
   for (const invariant of ['x-sessions-signature-256','createHmac','lease_expires_at','maxAttempts','assertSafeWebhookUrl']) if (!webhookWorker.includes(invariant)) throw new Error(`Webhook delivery invariant missing: ${invariant}`);
   const webhookCrypto = await readFile('apps/api/src/webhook-crypto.ts', 'utf8');
@@ -102,8 +105,10 @@ async function main() {
   for (const invariant of ['principal_signing_keys','fingerprint_sha256','signing_key_id']) if (!signingKeySchema.includes(invariant)) throw new Error(`Signing-key schema invariant missing: ${invariant}`);
   const attestationBinding = await readFile('infrastructure/postgres/025-attestation-binding-lifecycle.sql', 'utf8');
   for (const invariant of ['attestation subject digest does not match artifact','attestation repository does not match artifact','trg_sessions_active_repo_artifacts','trg_sessions_active_repo_attestations']) if (!attestationBinding.includes(invariant)) throw new Error(`Attestation binding/lifecycle invariant missing: ${invariant}`);
+  const orgPolicySchema = await readFile('infrastructure/postgres/026-organization-security-policy.sql', 'utf8');
+  for (const invariant of ['organization_security_policies','sessions_enforce_branch_policy_floor','sessions_enforce_environment_policy_floor','effective branch policy','effective environment policy']) if (!orgPolicySchema.includes(invariant)) throw new Error(`Organization policy schema invariant missing: ${invariant}`);
   const recovery = await readFile('scripts/qualify-current-recovery.sh', 'utf8');
-  for (const invariant of ['pg_dump','pg_restore','repository_artifacts','artifact_attestations','principal_signing_keys']) if (!recovery.includes(invariant)) throw new Error(`Current recovery invariant missing: ${invariant}`);
+  for (const invariant of ['pg_dump','pg_restore','repository_artifacts','artifact_attestations','principal_signing_keys','organization_security_policies']) if (!recovery.includes(invariant)) throw new Error(`Current recovery invariant missing: ${invariant}`);
   console.log(JSON.stringify({
     status: 'internally-launch-ready-structure',
     checkedAt: new Date().toISOString(),
