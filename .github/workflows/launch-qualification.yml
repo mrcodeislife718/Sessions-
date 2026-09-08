@@ -48,6 +48,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Qualify production Postgres, migration and recovery path
         run: bash scripts/qualify-postgres.sh
+      - name: Qualify transactional webhook outbox
+        run: bash scripts/qualify-webhook-outbox.sh
 
   commercial-proof-contract:
     runs-on: ubuntu-latest
