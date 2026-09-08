@@ -56,6 +56,8 @@ jobs:
         run: bash scripts/qualify-native-webhooks.sh
       - name: Qualify repository lifecycle governance
         run: bash scripts/qualify-repository-lifecycle.sh
+      - name: Qualify supply chain artifact and attestation policy
+        run: bash scripts/qualify-supply-chain.sh
 
   commercial-proof-contract:
     runs-on: ubuntu-latest
