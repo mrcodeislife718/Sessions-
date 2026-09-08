@@ -41,9 +41,7 @@ latest="$(basename "${migrations[${#migrations[@]}-1]}")"
 [[ "$latest" =~ ^[0-9]{3}-.+\.sql$ ]] || { echo "Unexpected latest migration name: $latest" >&2; exit 1; }
 require_grep 'mapfile -t migrations < <(bash scripts/list-migrations.sh)' scripts/deploy-production.sh 'deploy uses canonical migration order'
 
-for dockerfile in Dockerfile.auth Dockerfile.billing Dockerfile.repositories Dockerfile.workflows Dockerfile.executor Dockerfile.api; do
-  require_grep "$dockerfile" "$rendered" "production image $dockerfile"
-done
+for dockerfile in Dockerfile.auth Dockerfile.billing Dockerfile.repositories Dockerfile.workflows Dockerfile.executor Dockerfile.api; do require_grep "$dockerfile" "$rendered" "production image $dockerfile"; done
 require_grep 'STRIPE_SECRET_KEY: sk_test_qualification' "$rendered" 'Stripe secret propagation'
 require_grep 'STRIPE_WEBHOOK_SECRET: whsec_qualification' "$rendered" 'Stripe webhook secret propagation'
 require_grep 'STRIPE_PRICE_DEVELOPER: price_qualification' "$rendered" 'Stripe developer price propagation'
@@ -57,7 +55,7 @@ require_grep 'SESSIONS_JOB_VOLUME: sessions_jobs' "$rendered" 'executor job volu
 require_grep 'SESSIONS_ACTION_MEMORY: 1g' "$rendered" 'executor memory limit'
 require_regex 'SESSIONS_ACTION_CPUS: ("?1\.0"?|1)' "$rendered" 'executor CPU limit'
 
-for script in scripts/backup-production.sh scripts/restore-production.sh scripts/deploy-production.sh scripts/rollback-production.sh scripts/check-production-slo.sh scripts/provision-workspace.sh scripts/seed-billing-qualification.sh scripts/qualify-current-postgres.sh scripts/qualify-webhook-outbox.sh scripts/qualify-release-governance.sh scripts/qualify-native-webhooks.sh scripts/qualify-repository-lifecycle.sh scripts/qualify-supply-chain.sh; do
+for script in scripts/backup-production.sh scripts/restore-production.sh scripts/deploy-production.sh scripts/rollback-production.sh scripts/check-production-slo.sh scripts/provision-workspace.sh scripts/seed-billing-qualification.sh scripts/qualify-current-postgres.sh scripts/qualify-current-recovery.sh scripts/qualify-webhook-outbox.sh scripts/qualify-release-governance.sh scripts/qualify-native-webhooks.sh scripts/qualify-repository-lifecycle.sh scripts/qualify-supply-chain.sh; do
   test -s "$script" || { echo "Production qualification missing non-empty script: $script" >&2; exit 1; }
   bash -n "$script"
 done
@@ -73,6 +71,7 @@ require_grep 'ROLLBACK_REF' scripts/rollback-production.sh 'rollback ref support
 require_grep 'SESSIONS_SLO_READY_MS' scripts/check-production-slo.sh 'SLO readiness threshold'
 
 require_grep '/webhooks/stripe' infrastructure/docker/Caddyfile 'Stripe webhook route'
+require_grep '/api/organization/security-policy' infrastructure/docker/Caddyfile 'organization security policy route'
 require_grep 'repositoryControl' infrastructure/docker/Caddyfile 'repository governance route'
 require_grep 'lifecycle' infrastructure/docker/Caddyfile 'repository lifecycle route'
 require_grep 'branch-policies' infrastructure/docker/Caddyfile 'branch policy route'
@@ -87,7 +86,7 @@ require_grep 'workflowControl' infrastructure/docker/Caddyfile 'workflow control
 require_grep 'reverse_proxy workflows:4400' infrastructure/docker/Caddyfile 'workflow proxy'
 require_grep 'reverse_proxy api:4000' infrastructure/docker/Caddyfile 'API proxy'
 
-for schema in infrastructure/postgres/012-sessions-native-repository.sql infrastructure/postgres/014-action-workflows.sql infrastructure/postgres/018-protected-branch-governance.sql infrastructure/postgres/019-webhook-outbox.sql infrastructure/postgres/020-release-deployment-governance.sql infrastructure/postgres/021-native-repository-webhook-events.sql infrastructure/postgres/022-repository-lifecycle.sql infrastructure/postgres/023-supply-chain-attestations.sql infrastructure/postgres/024-signing-keys.sql infrastructure/postgres/025-attestation-binding-lifecycle.sql; do test -s "$schema" || { echo "Production qualification missing schema: $schema" >&2; exit 1; }; done
+for schema in infrastructure/postgres/012-sessions-native-repository.sql infrastructure/postgres/014-action-workflows.sql infrastructure/postgres/018-protected-branch-governance.sql infrastructure/postgres/019-webhook-outbox.sql infrastructure/postgres/020-release-deployment-governance.sql infrastructure/postgres/021-native-repository-webhook-events.sql infrastructure/postgres/022-repository-lifecycle.sql infrastructure/postgres/023-supply-chain-attestations.sql infrastructure/postgres/024-signing-keys.sql infrastructure/postgres/025-attestation-binding-lifecycle.sql infrastructure/postgres/026-organization-security-policy.sql; do test -s "$schema" || { echo "Production qualification missing schema: $schema" >&2; exit 1; }; done
 require_grep 'repository_branch_policies' infrastructure/postgres/018-protected-branch-governance.sql 'protected branch policy schema'
 require_grep 'webhook_deliveries' infrastructure/postgres/019-webhook-outbox.sql 'durable webhook delivery schema'
 require_grep 'repository_environment_policies' infrastructure/postgres/020-release-deployment-governance.sql 'protected environment schema'
@@ -99,7 +98,15 @@ require_grep 'require_attested_artifact' infrastructure/postgres/023-supply-chai
 require_grep 'principal_signing_keys' infrastructure/postgres/024-signing-keys.sql 'signing key registry'
 require_grep 'attestation subject digest does not match artifact' infrastructure/postgres/025-attestation-binding-lifecycle.sql 'attestation subject binding'
 require_grep 'trg_sessions_active_repo_attestations' infrastructure/postgres/025-attestation-binding-lifecycle.sql 'archived repository attestation guard'
+require_grep 'organization_security_policies' infrastructure/postgres/026-organization-security-policy.sql 'organization security policy schema'
+require_grep 'sessions_enforce_branch_policy_floor' infrastructure/postgres/026-organization-security-policy.sql 'organization branch policy floor'
+require_grep 'sessions_enforce_environment_policy_floor' infrastructure/postgres/026-organization-security-policy.sql 'organization environment policy floor'
+require_grep 'effective branch policy' infrastructure/postgres/026-organization-security-policy.sql 'organization branch enforcement without repository-local policy'
+require_grep 'effective environment policy' infrastructure/postgres/026-organization-security-policy.sql 'organization environment enforcement without repository-local policy'
 
+require_grep 'handleOrganizationSecurity' apps/api/src/repository-server.ts 'organization policy API wiring'
+require_grep 'active Enterprise entitlement' apps/api/src/organization-security.ts 'enterprise entitlement gate'
+require_grep 'organization.security_policy.update' apps/api/src/organization-security.ts 'organization policy audit record'
 require_grep 'handleSupplyChain' apps/api/src/repository-server.ts 'supply-chain API wiring'
 require_grep 'signature verification failed' apps/api/src/supply-chain.ts 'cryptographic attestation verification'
 require_grep 'attestation repository does not match artifact' apps/api/src/supply-chain.ts 'API attestation binding'
@@ -111,4 +118,4 @@ require_grep '"ALL"' apps/runner/src/workflow-executor.ts 'drop all Linux capabi
 require_grep '"no-new-privileges:true"' apps/runner/src/workflow-executor.ts 'no-new-privileges executor policy'
 require_grep 'secretsRedacted: true' apps/runner/src/workflow-executor.ts 'secret redaction evidence'
 
-echo "Production topology validated through $latest: canonical schema migration, commerce, auth, native source control, lifecycle/branch/environment governance, cryptographically bound supply-chain evidence, durable integrations, isolated execution, release/deploy integrity and recovery are wired consistently."
+echo "Production topology validated through $latest: canonical schema migration, commerce, auth, native source control, repository and organization governance, cryptographically bound supply-chain evidence, durable integrations, isolated execution, release/deploy integrity and recovery are wired consistently."
