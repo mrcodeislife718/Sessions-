@@ -2,6 +2,7 @@ import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { handleReleaseGovernance } from "./release-governance.js";
+import { handleRepositoryLifecycle } from "./repository-lifecycle.js";
 
 const port = Number(process.env.REPOSITORY_PORT ?? 4300);
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://sessions:sessions@localhost:5432/sessions";
@@ -49,14 +50,14 @@ async function upsertRepository(identity: Identity, body: any) {
   if (!/^repo_[A-Za-z0-9._:-]+$/.test(id)) throw new HttpError(400, "valid Sessions repositoryId is required");
   if (name.length < 1 || name.length > 200) throw new HttpError(400, "repository name is required");
   const visibility = body.visibility === "public" ? "public" : "private";
-  const result = await pool.query(`insert into hosted_repositories(id,workspace_id,name,visibility,default_workstream_id,source_digest) values($1,$2,$3,$4,$5,$6) on conflict(id) do update set name=excluded.name,visibility=excluded.visibility,default_workstream_id=coalesce(excluded.default_workstream_id,hosted_repositories.default_workstream_id),source_digest=coalesce(excluded.source_digest,hosted_repositories.source_digest),updated_at=now() where hosted_repositories.workspace_id=excluded.workspace_id returning *`, [id, identity.workspaceId, name, visibility, body.defaultWorkstreamId ?? null, body.sourceDigest ?? null]);
-  if (!result.rowCount) throw new HttpError(409, "repository identifier belongs to another workspace");
+  const result = await pool.query(`insert into hosted_repositories(id,workspace_id,name,visibility,default_workstream_id,source_digest) values($1,$2,$3,$4,$5,$6) on conflict(id) do update set name=excluded.name,visibility=excluded.visibility,default_workstream_id=coalesce(excluded.default_workstream_id,hosted_repositories.default_workstream_id),source_digest=coalesce(excluded.source_digest,hosted_repositories.source_digest),updated_at=now() where hosted_repositories.workspace_id=excluded.workspace_id and hosted_repositories.lifecycle_status='active' returning *`, [id, identity.workspaceId, name, visibility, body.defaultWorkstreamId ?? null, body.sourceDigest ?? null]);
+  if (!result.rowCount) throw new HttpError(409, "repository identifier belongs to another workspace or is not active");
   await pool.query("insert into product_events(id,workspace_id,principal_id,event_name,repository_id,properties) values($1,$2,$3,'repository_registered',$4,$5)", [`product_${randomUUID()}`, identity.workspaceId, identity.principalId, id, JSON.stringify({ visibility })]);
   return result.rows[0];
 }
 
 async function ingestGitImport(identity: Identity, repositoryId: string, body: any) {
-  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); await requireRepository(identity, repositoryId);
+  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); const repository = await requireRepository(identity, repositoryId); if (repository.lifecycle_status !== "active") throw new HttpError(409, "repository is read-only");
   const commits = Array.isArray(body.commits) ? body.commits.slice(0, 100000) : [];
   const branches = Array.isArray(body.branches) ? body.branches.slice(0, 10000) : [];
   const tags = Array.isArray(body.tags) ? body.tags.slice(0, 10000) : [];
@@ -73,7 +74,7 @@ async function ingestGitImport(identity: Identity, repositoryId: string, body: a
       if (!item?.name) continue;
       await client.query("insert into repository_git_refs(repository_id,ref_type,name,git_sha,sessions_checkpoint_id) values($1,$2,$3,$4,$5) on conflict(repository_id,ref_type,name) do update set git_sha=excluded.git_sha,sessions_checkpoint_id=excluded.sessions_checkpoint_id", [repositoryId, type, String(item.name), item.gitSha ?? null, item.checkpointId ?? null]);
     }
-    await pool.query("insert into product_events(id,workspace_id,principal_id,event_name,repository_id,properties) values($1,$2,$3,'git_repository_imported',$4,$5)", [`product_${randomUUID()}`, identity.workspaceId, identity.principalId, repositoryId, JSON.stringify({ commits: commits.length, branches: branches.length, tags: tags.length })]);
+    await client.query("insert into product_events(id,workspace_id,principal_id,event_name,repository_id,properties) values($1,$2,$3,'git_repository_imported',$4,$5)", [`product_${randomUUID()}`, identity.workspaceId, identity.principalId, repositoryId, JSON.stringify({ commits: commits.length, branches: branches.length, tags: tags.length })]);
     await client.query("commit");
     return { importId, repositoryId, commits: commits.length, branches: branches.length, tags: tags.length };
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
@@ -86,7 +87,7 @@ async function listBranchPolicies(identity: Identity, repositoryId: string) {
 }
 
 async function upsertBranchPolicy(identity: Identity, repositoryId: string, body: any) {
-  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); await requireRepository(identity, repositoryId);
+  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); const repository = await requireRepository(identity, repositoryId); if (repository.lifecycle_status !== "active") throw new HttpError(409, "repository is read-only");
   const branchName = String(body.branchName ?? "").trim();
   if (!branchName || branchName.length > 255 || /[\u0000-\u001f]/.test(branchName)) throw new HttpError(400, "valid branchName is required");
   const requiredApprovals = Number(body.requiredApprovals ?? 1);
@@ -99,7 +100,7 @@ async function upsertBranchPolicy(identity: Identity, repositoryId: string, body
 }
 
 async function deleteBranchPolicy(identity: Identity, repositoryId: string, branchName: string) {
-  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); await requireRepository(identity, repositoryId);
+  requireScope(identity, "sessions:write"); await requireActiveEntitlement(identity); const repository = await requireRepository(identity, repositoryId); if (repository.lifecycle_status !== "active") throw new HttpError(409, "repository is read-only");
   const result = await pool.query("delete from repository_branch_policies where workspace_id=$1 and repository_id=$2 and branch_name=$3 returning branch_name", [identity.workspaceId, repositoryId, branchName]);
   if (!result.rowCount) throw new HttpError(404, "branch policy not found");
   return { repositoryId, branchName, deleted: true };
@@ -119,6 +120,7 @@ const server = http.createServer(async (req, res) => {
     if (policies && req.method === "PUT") return send(res, 200, await upsertBranchPolicy(identity, decodeURIComponent(policies[1]), await jsonBody(req)));
     const policy = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branch-policies\/([^/]+)$/);
     if (policy && req.method === "DELETE") return send(res, 200, await deleteBranchPolicy(identity, decodeURIComponent(policy[1]), decodeURIComponent(policy[2])));
+    if (await handleRepositoryLifecycle({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
     if (await handleReleaseGovernance({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
     throw new HttpError(404, "not found");
   } catch (error) { const candidate = error as { status?: number }; const status = error instanceof HttpError ? error.status : typeof candidate?.status === "number" ? candidate.status : 500; const message = error instanceof Error ? error.message : "internal error"; return send(res, status, { error: status >= 500 ? "internal error" : message }); }
