@@ -29,7 +29,7 @@ jobs:
 
   postgres-recovery:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17
@@ -58,6 +58,8 @@ jobs:
         run: bash scripts/qualify-repository-lifecycle.sh
       - name: Qualify supply chain artifact and attestation policy
         run: bash scripts/qualify-supply-chain.sh
+      - name: Qualify full current-schema dump and restore
+        run: bash scripts/qualify-current-recovery.sh
 
   commercial-proof-contract:
     runs-on: ubuntu-latest
