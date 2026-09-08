@@ -36,30 +36,40 @@ create or replace function sessions_enqueue_native_ref_webhook() returns trigger
 declare
   event_id uuid := gen_random_uuid();
   workspace text;
-  row_data record;
+  repository_value text;
+  ref_type_value text;
+  ref_name_value text;
+  checkpoint_value text;
+  metadata_value jsonb;
+  updated_value timestamptz;
   event_name text;
   event_payload jsonb;
 begin
-  if tg_op='DELETE' then row_data:=old; else row_data:=new; end if;
-  select workspace_id into workspace from hosted_repositories where id=row_data.repository_id;
+  if tg_op='DELETE' then
+    repository_value:=old.repository_id; ref_type_value:=old.ref_type; ref_name_value:=old.name; checkpoint_value:=old.checkpoint_id; metadata_value:=old.metadata; updated_value:=old.updated_at;
+  else
+    repository_value:=new.repository_id; ref_type_value:=new.ref_type; ref_name_value:=new.name; checkpoint_value:=new.checkpoint_id; metadata_value:=new.metadata; updated_value:=new.updated_at;
+  end if;
+  select workspace_id into workspace from hosted_repositories where id=repository_value;
   if workspace is null then raise exception 'native ref repository has no workspace'; end if;
-  event_name:=row_data.ref_type || '.' || lower(tg_op);
+  event_name:=ref_type_value || '.' || lower(tg_op);
   event_payload:=jsonb_build_object(
     'event',event_name,
-    'repositoryId',row_data.repository_id,
-    'refType',row_data.ref_type,
-    'name',row_data.name,
-    'checkpointId',row_data.checkpoint_id,
-    'metadata',coalesce(row_data.metadata,'{}'::jsonb),
-    'updatedAt',row_data.updated_at
+    'repositoryId',repository_value,
+    'refType',ref_type_value,
+    'name',ref_name_value,
+    'checkpointId',checkpoint_value,
+    'metadata',coalesce(metadata_value,'{}'::jsonb),
+    'updatedAt',updated_value
   );
   insert into webhook_events(id,workspace_id,repository_id,event_name,aggregate_type,aggregate_id,payload,occurred_at)
-  values(event_id,workspace,row_data.repository_id,event_name,row_data.ref_type,row_data.name,event_payload,coalesce(row_data.updated_at,now()));
+  values(event_id,workspace,repository_value,event_name,ref_type_value,ref_name_value,event_payload,coalesce(updated_value,now()));
   insert into webhook_deliveries(webhook_id,event_id)
   select w.id,event_id from repository_webhooks w
-  where w.workspace_id=workspace and w.repository_id=row_data.repository_id and w.active=true
+  where w.workspace_id=workspace and w.repository_id=repository_value and w.active=true
     and ('*'=any(w.events) or event_name=any(w.events));
-  return case when tg_op='DELETE' then old else new end;
+  if tg_op='DELETE' then return old; end if;
+  return new;
 end;
 $$ language plpgsql;
 
