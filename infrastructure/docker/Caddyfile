@@ -18,7 +18,7 @@
   # Repository administration and legacy migration are isolated behind the
   # repository control service. Normal native repository data paths remain on
   # the first-party Sessions API.
-  @repositoryControl path_regexp repositoryControl ^/api/repositories/[^/]+/(git-import|lifecycle|branch-policies(?:/.*)?|environment-policies(?:/.*)?|deployments/[^/]+/(approvals|status))$
+  @repositoryControl path_regexp repositoryControl ^/api/repositories/[^/]+/(git-import|lifecycle|branch-policies(?:/.*)?|environment-policies(?:/.*)?|deployments/[^/]+/(approvals|status)|signing-keys(?:/.*)?|artifacts(?:/.*)?)$
   handle @repositoryControl {
     reverse_proxy repositories:4300
   }
