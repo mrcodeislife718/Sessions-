@@ -42,7 +42,7 @@ select 'workspace_qualification','repo_qualification','cp_native_qualification',
 from repository_releases r where r.repository_id='repo_qualification' and r.tag_name='v0.0.supply-chain'
 on conflict(repository_id,sha256) do update set release_id=excluded.release_id,sbom=excluded.sbom,metadata=excluded.metadata;
 insert into artifact_attestations(artifact_id,predicate_type,statement,signer_principal_id,signature_algorithm,signature,signing_key_id)
-select a.id,'https://sessions.dev/attestation/build/v1',jsonb_build_object('subject',jsonb_build_object('sha256',a.sha256),'commitId',a.commit_id,'builder','sessions-actions'),'principal_qualification','ed25519','qualification-signature',k.id
+select a.id,'https://sessions.dev/attestation/build/v1',jsonb_build_object('subject',jsonb_build_object('sha256',a.sha256),'repositoryId',a.repository_id,'commitId',a.commit_id,'releaseId',a.release_id::text,'builder',jsonb_build_object('id','sessions-actions')),'principal_qualification','ed25519','qualification-signature',k.id
 from repository_artifacts a cross join principal_signing_keys k
 where a.repository_id='repo_qualification' and a.sha256=repeat('b',64) and k.workspace_id='workspace_qualification' and k.fingerprint_sha256=repeat('a',64)
 on conflict(artifact_id,predicate_type,signer_principal_id) do update set statement=excluded.statement,signing_key_id=excluded.signing_key_id,signature=excluded.signature;
@@ -53,8 +53,8 @@ from repository_releases r where r.repository_id='repo_qualification' and r.tag_
 DO $$
 BEGIN
   IF (select count(*) from repository_artifacts where repository_id='repo_qualification' and commit_id='cp_native_qualification' and sbom is not null)<1 THEN RAISE EXCEPTION 'artifact SBOM persistence assertion failed'; END IF;
-  IF (select count(*) from artifact_attestations at join repository_artifacts a on a.id=at.artifact_id where a.repository_id='repo_qualification' and a.sha256=repeat('b',64))<1 THEN RAISE EXCEPTION 'artifact attestation persistence assertion failed'; END IF;
+  IF (select count(*) from artifact_attestations at join repository_artifacts a on a.id=at.artifact_id where a.repository_id='repo_qualification' and a.sha256=repeat('b',64) and at.statement->>'repositoryId'=a.repository_id and at.statement->>'commitId'=a.commit_id and at.statement#>>'{subject,sha256}'=a.sha256)<1 THEN RAISE EXCEPTION 'bound artifact attestation persistence assertion failed'; END IF;
   IF (select count(*) from repository_deployments where repository_id='repo_qualification' and environment='supply-chain-production')<1 THEN RAISE EXCEPTION 'attested deployment admission assertion failed'; END IF;
 END $$;
 SQL
-printf 'Supply-chain qualification passed: exact checkpoint/release artifact linkage, SBOM requirement and attested deployment admission enforced.\n'
+printf 'Supply-chain qualification passed: exact checkpoint/release/artifact binding, SBOM requirement and attested deployment admission enforced.\n'
