@@ -292,27 +292,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB required}
     volumes:
       - sessions_postgres:/var/lib/postgresql/data
-      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
-      - ./infrastructure/postgres/002-hosted-repositories.sql:/docker-entrypoint-initdb.d/002-hosted-repositories.sql:ro
-      - ./infrastructure/postgres/003-source-storage.sql:/docker-entrypoint-initdb.d/003-source-storage.sql:ro
-      - ./infrastructure/postgres/004-production-controls.sql:/docker-entrypoint-initdb.d/004-production-controls.sql:ro
-      - ./infrastructure/postgres/005-commercial-operations.sql:/docker-entrypoint-initdb.d/005-commercial-operations.sql:ro
-      - ./infrastructure/postgres/006-product-analytics.sql:/docker-entrypoint-initdb.d/006-product-analytics.sql:ro
-      - ./infrastructure/postgres/007-billing-integrations.sql:/docker-entrypoint-initdb.d/007-billing-integrations.sql:ro
-      - ./infrastructure/postgres/008-repository-collaboration.sql:/docker-entrypoint-initdb.d/008-repository-collaboration.sql:ro
-      - ./infrastructure/postgres/009-lifecycle-evidence-events.sql:/docker-entrypoint-initdb.d/009-lifecycle-evidence-events.sql:ro
-      - ./infrastructure/postgres/010-hosted-auth.sql:/docker-entrypoint-initdb.d/010-hosted-auth.sql:ro
-      - ./infrastructure/postgres/011-repository-onboarding.sql:/docker-entrypoint-initdb.d/011-repository-onboarding.sql:ro
-      - ./infrastructure/postgres/012-sessions-native-repository.sql:/docker-entrypoint-initdb.d/012-sessions-native-repository.sql:ro
-      - ./infrastructure/postgres/013-team-invitations.sql:/docker-entrypoint-initdb.d/013-team-invitations.sql:ro
-      - ./infrastructure/postgres/014-action-workflows.sql:/docker-entrypoint-initdb.d/014-action-workflows.sql:ro
-      - ./infrastructure/postgres/015-reasoning-graph.sql:/docker-entrypoint-initdb.d/015-reasoning-graph.sql:ro
-      - ./infrastructure/postgres/016-execution-lineage-indexes.sql:/docker-entrypoint-initdb.d/016-execution-lineage-indexes.sql:ro
-      - ./infrastructure/postgres/017-causal-traversal-indexes.sql:/docker-entrypoint-initdb.d/017-causal-traversal-indexes.sql:ro
-      - ./infrastructure/postgres/018-protected-branch-governance.sql:/docker-entrypoint-initdb.d/018-protected-branch-governance.sql:ro
-      - ./infrastructure/postgres/019-webhook-outbox.sql:/docker-entrypoint-initdb.d/019-webhook-outbox.sql:ro
-      - ./infrastructure/postgres/020-release-deployment-governance.sql:/docker-entrypoint-initdb.d/020-release-deployment-governance.sql:ro
-      - ./infrastructure/postgres/021-native-repository-webhook-events.sql:/docker-entrypoint-initdb.d/021-native-repository-webhook-events.sql:ro
+      - ./infrastructure/postgres:/sessions-migrations:ro
+      - ./infrastructure/docker/init-postgres.sh:/docker-entrypoint-initdb.d/001-sessions-migrations.sh:ro
     networks: [data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
