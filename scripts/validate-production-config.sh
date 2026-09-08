@@ -86,13 +86,12 @@ require_grep 'workflowControl' infrastructure/docker/Caddyfile 'workflow control
 require_grep 'reverse_proxy workflows:4400' infrastructure/docker/Caddyfile 'workflow proxy'
 require_grep 'reverse_proxy api:4000' infrastructure/docker/Caddyfile 'API proxy'
 
-for schema in infrastructure/postgres/012-sessions-native-repository.sql infrastructure/postgres/014-action-workflows.sql infrastructure/postgres/018-protected-branch-governance.sql infrastructure/postgres/019-webhook-outbox.sql infrastructure/postgres/020-release-deployment-governance.sql infrastructure/postgres/021-native-repository-webhook-events.sql infrastructure/postgres/022-repository-lifecycle.sql infrastructure/postgres/023-supply-chain-attestations.sql infrastructure/postgres/024-signing-keys.sql infrastructure/postgres/025-attestation-binding-lifecycle.sql infrastructure/postgres/026-organization-security-policy.sql; do test -s "$schema" || { echo "Production qualification missing schema: $schema" >&2; exit 1; }; done
+for schema in infrastructure/postgres/012-sessions-native-repository.sql infrastructure/postgres/014-action-workflows.sql infrastructure/postgres/018-protected-branch-governance.sql infrastructure/postgres/019-webhook-outbox.sql infrastructure/postgres/020-release-deployment-governance.sql infrastructure/postgres/021-native-repository-webhook-events.sql infrastructure/postgres/022-repository-lifecycle.sql infrastructure/postgres/023-supply-chain-attestations.sql infrastructure/postgres/024-signing-keys.sql infrastructure/postgres/025-attestation-binding-lifecycle.sql infrastructure/postgres/026-organization-security-policy.sql infrastructure/postgres/027-lifecycle-purge-bypass.sql; do test -s "$schema" || { echo "Production qualification missing schema: $schema" >&2; exit 1; }; done
 require_grep 'repository_branch_policies' infrastructure/postgres/018-protected-branch-governance.sql 'protected branch policy schema'
 require_grep 'webhook_deliveries' infrastructure/postgres/019-webhook-outbox.sql 'durable webhook delivery schema'
 require_grep 'repository_environment_policies' infrastructure/postgres/020-release-deployment-governance.sql 'protected environment schema'
 require_grep 'checkpoint.insert' infrastructure/postgres/021-native-repository-webhook-events.sql 'native checkpoint integration event'
 require_grep 'lifecycle_status' infrastructure/postgres/022-repository-lifecycle.sql 'repository lifecycle schema'
-require_grep 'sessions.lifecycle_purge' infrastructure/postgres/022-repository-lifecycle.sql 'controlled purge bypass'
 require_grep 'repository_artifacts' infrastructure/postgres/023-supply-chain-attestations.sql 'artifact evidence schema'
 require_grep 'require_attested_artifact' infrastructure/postgres/023-supply-chain-attestations.sql 'attested artifact environment policy'
 require_grep 'principal_signing_keys' infrastructure/postgres/024-signing-keys.sql 'signing key registry'
@@ -103,6 +102,8 @@ require_grep 'sessions_enforce_branch_policy_floor' infrastructure/postgres/026-
 require_grep 'sessions_enforce_environment_policy_floor' infrastructure/postgres/026-organization-security-policy.sql 'organization environment policy floor'
 require_grep 'effective branch policy' infrastructure/postgres/026-organization-security-policy.sql 'organization branch enforcement without repository-local policy'
 require_grep 'effective environment policy' infrastructure/postgres/026-organization-security-policy.sql 'organization environment enforcement without repository-local policy'
+require_grep "current_setting('sessions.lifecycle_purge',true)" infrastructure/postgres/027-lifecycle-purge-bypass.sql 'controlled purge authorization check'
+require_grep 'purge_authorized' infrastructure/postgres/027-lifecycle-purge-bypass.sql 'controlled purge write-guard bypass'
 
 require_grep 'handleOrganizationSecurity' apps/api/src/repository-server.ts 'organization policy API wiring'
 require_grep 'active Enterprise entitlement' apps/api/src/organization-security.ts 'enterprise entitlement gate'
@@ -118,4 +119,4 @@ require_grep '"ALL"' apps/runner/src/workflow-executor.ts 'drop all Linux capabi
 require_grep '"no-new-privileges:true"' apps/runner/src/workflow-executor.ts 'no-new-privileges executor policy'
 require_grep 'secretsRedacted: true' apps/runner/src/workflow-executor.ts 'secret redaction evidence'
 
-echo "Production topology validated through $latest: canonical schema migration, commerce, auth, native source control, repository and organization governance, cryptographically bound supply-chain evidence, durable integrations, isolated execution, release/deploy integrity and recovery are wired consistently."
+echo "Production topology validated through $latest: canonical schema migration, commerce, auth, native source control, repository and organization governance, cryptographically bound supply-chain evidence, controlled lifecycle purge, durable integrations, isolated execution, release/deploy integrity and recovery are wired consistently."
