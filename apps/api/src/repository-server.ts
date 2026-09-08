@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { handleReleaseGovernance } from "./release-governance.js";
 import { handleRepositoryLifecycle } from "./repository-lifecycle.js";
+import { handleSupplyChain } from "./supply-chain.js";
 
 const port = Number(process.env.REPOSITORY_PORT ?? 4300);
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://sessions:sessions@localhost:5432/sessions";
@@ -122,6 +123,7 @@ const server = http.createServer(async (req, res) => {
     if (policy && req.method === "DELETE") return send(res, 200, await deleteBranchPolicy(identity, decodeURIComponent(policy[1]), decodeURIComponent(policy[2])));
     if (await handleRepositoryLifecycle({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
     if (await handleReleaseGovernance({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
+    if (await handleSupplyChain({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
     throw new HttpError(404, "not found");
   } catch (error) { const candidate = error as { status?: number }; const status = error instanceof HttpError ? error.status : typeof candidate?.status === "number" ? candidate.status : 500; const message = error instanceof Error ? error.message : "internal error"; return send(res, status, { error: status >= 500 ? "internal error" : message }); }
 });
