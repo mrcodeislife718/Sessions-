@@ -45,6 +45,11 @@ const requiredMigrations = [
   'infrastructure/postgres/011-repository-onboarding.sql',
   'infrastructure/postgres/012-sessions-native-repository.sql',
   'infrastructure/postgres/013-team-invitations.sql',
+  'infrastructure/postgres/014-action-workflows.sql',
+  'infrastructure/postgres/015-reasoning-graph.sql',
+  'infrastructure/postgres/016-execution-lineage-indexes.sql',
+  'infrastructure/postgres/017-causal-traversal-indexes.sql',
+  'infrastructure/postgres/018-protected-branch-governance.sql',
 ];
 
 const productionEnvKeys = [
@@ -73,6 +78,8 @@ async function main() {
   }
   const billing = await readFile('apps/api/src/billing-server.ts', 'utf8');
   for (const invariant of ['verifyStripeSignature','usage_events','workspace_entitlements','api_credentials']) if (!billing.includes(invariant)) throw new Error(`Billing/entitlement invariant missing: ${invariant}`);
+  const repositoryServer = await readFile('apps/api/src/repository-server.ts', 'utf8');
+  for (const invariant of ['repository_branch_policies','requiredHumanApprovals','branch-policies']) if (!repositoryServer.includes(invariant)) throw new Error(`Repository governance invariant missing: ${invariant}`);
   console.log(JSON.stringify({
     status: 'internally-launch-ready-structure',
     checkedAt: new Date().toISOString(),
