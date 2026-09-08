@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { handleReleaseGovernance } from "./release-governance.js";
 
 const port = Number(process.env.REPOSITORY_PORT ?? 4300);
 const databaseUrl = process.env.DATABASE_URL ?? "postgresql://sessions:sessions@localhost:5432/sessions";
@@ -10,7 +11,7 @@ const pool = new Pool({ connectionString: databaseUrl, max: Number(process.env.S
 class HttpError extends Error { constructor(public readonly status: number, message: string) { super(message); } }
 type Identity = { workspaceId: string; principalId: string; scopes: string[] };
 
-function send(res: http.ServerResponse, status: number, body: unknown) { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(body)); }
+function send(res: http.ServerResponse, status: number, body: unknown) { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(status === 204 ? undefined : JSON.stringify(body)); }
 function hashToken(token: string) { return createHash("sha256").update(token).digest("hex"); }
 function hasScope(identity: Identity, scope: string) { return identity.scopes.includes("*") || identity.scopes.includes(scope); }
 function requireScope(identity: Identity, scope: string) { if (!hasScope(identity, scope)) throw new HttpError(403, `missing scope: ${scope}`); }
@@ -72,7 +73,7 @@ async function ingestGitImport(identity: Identity, repositoryId: string, body: a
       if (!item?.name) continue;
       await client.query("insert into repository_git_refs(repository_id,ref_type,name,git_sha,sessions_checkpoint_id) values($1,$2,$3,$4,$5) on conflict(repository_id,ref_type,name) do update set git_sha=excluded.git_sha,sessions_checkpoint_id=excluded.sessions_checkpoint_id", [repositoryId, type, String(item.name), item.gitSha ?? null, item.checkpointId ?? null]);
     }
-    await client.query("insert into product_events(id,workspace_id,principal_id,event_name,repository_id,properties) values($1,$2,$3,'git_repository_imported',$4,$5)", [`product_${randomUUID()}`, identity.workspaceId, identity.principalId, repositoryId, JSON.stringify({ commits: commits.length, branches: branches.length, tags: tags.length })]);
+    await pool.query("insert into product_events(id,workspace_id,principal_id,event_name,repository_id,properties) values($1,$2,$3,'git_repository_imported',$4,$5)", [`product_${randomUUID()}`, identity.workspaceId, identity.principalId, repositoryId, JSON.stringify({ commits: commits.length, branches: branches.length, tags: tags.length })]);
     await client.query("commit");
     return { importId, repositoryId, commits: commits.length, branches: branches.length, tags: tags.length };
   } catch (error) { await client.query("rollback"); throw error; } finally { client.release(); }
@@ -118,8 +119,9 @@ const server = http.createServer(async (req, res) => {
     if (policies && req.method === "PUT") return send(res, 200, await upsertBranchPolicy(identity, decodeURIComponent(policies[1]), await jsonBody(req)));
     const policy = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branch-policies\/([^/]+)$/);
     if (policy && req.method === "DELETE") return send(res, 200, await deleteBranchPolicy(identity, decodeURIComponent(policy[1]), decodeURIComponent(policy[2])));
+    if (await handleReleaseGovernance({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
     throw new HttpError(404, "not found");
-  } catch (error) { const status = error instanceof HttpError ? error.status : 500; const message = error instanceof Error ? error.message : "internal error"; return send(res, status, { error: status >= 500 ? "internal error" : message }); }
+  } catch (error) { const candidate = error as { status?: number }; const status = error instanceof HttpError ? error.status : typeof candidate?.status === "number" ? candidate.status : 500; const message = error instanceof Error ? error.message : "internal error"; return send(res, status, { error: status >= 500 ? "internal error" : message }); }
 });
 
 server.listen(port, "0.0.0.0", () => console.log(JSON.stringify({ level: "info", event: "repositories.started", port })));
