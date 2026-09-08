@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { handleOrganizationSecurity } from "./organization-security.js";
 import { handleReleaseGovernance } from "./release-governance.js";
 import { handleRepositoryLifecycle } from "./repository-lifecycle.js";
 import { handleSupplyChain } from "./supply-chain.js";
@@ -121,6 +122,7 @@ const server = http.createServer(async (req, res) => {
     if (policies && req.method === "PUT") return send(res, 200, await upsertBranchPolicy(identity, decodeURIComponent(policies[1]), await jsonBody(req)));
     const policy = url.pathname.match(/^\/api\/repositories\/([^/]+)\/branch-policies\/([^/]+)$/);
     if (policy && req.method === "DELETE") return send(res, 200, await deleteBranchPolicy(identity, decodeURIComponent(policy[1]), decodeURIComponent(policy[2])));
+    if (await handleOrganizationSecurity({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
     if (await handleRepositoryLifecycle({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
     if (await handleReleaseGovernance({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
     if (await handleSupplyChain({ pool, identity, req, url, body: () => jsonBody(req), send: (status, payload) => send(res, status, payload) })) return;
