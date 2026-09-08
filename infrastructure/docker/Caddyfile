@@ -22,6 +22,11 @@
     reverse_proxy repositories:4300
   }
 
+  @webhookControl path_regexp webhookControl ^/api/repositories/[^/]+/webhooks(?:/.*)?$
+  handle @webhookControl {
+    reverse_proxy webhooks:4500
+  }
+
   @workflowControl path_regexp workflowControl ^/api/repositories/[^/]+/(workflows(?:/.*)?|action-runs/[^/]+)$
   handle @workflowControl {
     reverse_proxy workflows:4400
