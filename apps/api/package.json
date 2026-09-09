@@ -12,6 +12,7 @@
     "start:repositories": "node dist/repository-server.js",
     "start:webhooks": "node dist/webhook-server.js",
     "start:webhook-worker": "node dist/webhook-worker.js",
+    "start:private-runners": "node dist/private-runner-server.js",
     "typecheck": "tsc -p . --noEmit",
     "test": "npm run build && node --test dist/security.test.js dist/billing.test.js dist/reliability-efficiency.test.js dist/economic-production.test.js dist/execution-lineage.test.js dist/supply-chain.test.js dist/enterprise-governance.test.js"
   },
