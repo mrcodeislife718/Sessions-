@@ -18,6 +18,7 @@ services:
       auth: { condition: service_healthy }
       repositories: { condition: service_healthy }
       workflows: { condition: service_healthy }
+      private-runners: { condition: service_healthy }
       webhooks: { condition: service_healthy }
     networks: [edge, control]
     security_opt: [no-new-privileges:true]
@@ -141,6 +142,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB required}
       SESSIONS_MAX_BODY_BYTES: ${SESSIONS_MAX_BODY_BYTES:-1048576}
       SESSIONS_WORKFLOW_DB_POOL_MAX: ${SESSIONS_WORKFLOW_DB_POOL_MAX:-10}
+      SESSIONS_ACTION_SECRET_KEY: ${SESSIONS_ACTION_SECRET_KEY:?SESSIONS_ACTION_SECRET_KEY required}
     expose: ["4400"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -152,6 +154,35 @@ services:
     pids_limit: 128
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4400/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  private-runners:
+    build: { context: ., dockerfile: infrastructure/docker/Dockerfile.api }
+    command: ["pnpm", "--filter", "@sessions/api", "start:private-runners"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PRIVATE_RUNNER_PORT: 4600
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB required}
+      SESSIONS_MAX_BODY_BYTES: ${SESSIONS_MAX_BODY_BYTES:-1048576}
+      SESSIONS_PRIVATE_RUNNER_DB_POOL_MAX: ${SESSIONS_PRIVATE_RUNNER_DB_POOL_MAX:-10}
+      SESSIONS_PRIVATE_RUNNER_LEASE_SECONDS: ${SESSIONS_PRIVATE_RUNNER_LEASE_SECONDS:-120}
+      SESSIONS_ACTION_LOG_BYTES: ${SESSIONS_ACTION_LOG_BYTES:-2097152}
+      SESSIONS_ACTION_SECRET_KEY: ${SESSIONS_ACTION_SECRET_KEY:?SESSIONS_ACTION_SECRET_KEY required}
+    expose: ["4600"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [control, data]
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4600/health >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -271,6 +302,7 @@ services:
       SESSIONS_ACTION_MEMORY: ${SESSIONS_ACTION_MEMORY:-1g}
       SESSIONS_ACTION_CPUS: ${SESSIONS_ACTION_CPUS:-1.0}
       SESSIONS_ACTION_PIDS: ${SESSIONS_ACTION_PIDS:-256}
+      SESSIONS_ACTION_SECRET_KEY: ${SESSIONS_ACTION_SECRET_KEY:?SESSIONS_ACTION_SECRET_KEY required}
       DOCKER_HOST: unix:///var/run/docker.sock
     depends_on:
       postgres: { condition: service_healthy }
