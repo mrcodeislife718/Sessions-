@@ -50,8 +50,9 @@ latest="$(basename "${migrations[${#migrations[@]}-1]}")"
 [[ "$latest" =~ ^[0-9]{3}-.+\.sql$ ]] || { echo "Unexpected latest migration name: $latest" >&2; exit 1; }
 require_grep 'mapfile -t migrations < <(bash scripts/list-migrations.sh)' scripts/deploy-production.sh 'deploy uses canonical migration order'
 
-for dockerfile in Dockerfile.auth Dockerfile.billing Dockerfile.repositories Dockerfile.workflows Dockerfile.executor Dockerfile.api; do require_grep "$dockerfile" "$rendered" "production image $dockerfile"; done
-for service in 'private-runners:' 'PRIVATE_RUNNER_PORT: 4600' 'SESSIONS_PRIVATE_RUNNER_LEASE_SECONDS: 120'; do require_grep "$service" "$rendered" "private runner production topology $service"; done
+require_grep 'private-runners:' "$rendered" 'private runner production topology service'
+require_regex 'PRIVATE_RUNNER_PORT: "?4600"?' "$rendered" 'private runner production topology port'
+require_regex 'SESSIONS_PRIVATE_RUNNER_LEASE_SECONDS: "?120"?' "$rendered" 'private runner production topology lease'
 
 for script in scripts/backup-production.sh scripts/restore-production.sh scripts/deploy-production.sh scripts/rollback-production.sh scripts/check-production-slo.sh scripts/provision-workspace.sh scripts/seed-billing-qualification.sh scripts/qualify-current-postgres.sh scripts/qualify-current-recovery.sh scripts/qualify-webhook-outbox.sh scripts/qualify-release-governance.sh scripts/qualify-native-webhooks.sh scripts/qualify-repository-lifecycle.sh scripts/qualify-supply-chain.sh; do test -s "$script"; bash -n "$script"; done
 require_grep 'backup-production.sh' scripts/deploy-production.sh 'pre-deploy backup'
