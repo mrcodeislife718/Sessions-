@@ -1,0 +1,28 @@
+services:
+  sessions-private-runner:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.private-runner
+    restart: unless-stopped
+    environment:
+      SESSIONS_PRIVATE_RUNNER_URL: ${SESSIONS_PRIVATE_RUNNER_URL:?HTTPS Sessions endpoint is required}
+      SESSIONS_PRIVATE_RUNNER_TOKEN: ${SESSIONS_PRIVATE_RUNNER_TOKEN:?Runner token is required}
+      SESSIONS_PRIVATE_RUNNER_ROOT: ${SESSIONS_PRIVATE_RUNNER_ROOT:-/var/lib/sessions-private-runner}
+      SESSIONS_PRIVATE_RUNNER_POLL_MS: ${SESSIONS_PRIVATE_RUNNER_POLL_MS:-2000}
+      SESSIONS_ACTION_LOG_BYTES: ${SESSIONS_ACTION_LOG_BYTES:-2097152}
+      SESSIONS_ACTION_MEMORY: ${SESSIONS_ACTION_MEMORY:-1g}
+      SESSIONS_ACTION_CPUS: ${SESSIONS_ACTION_CPUS:-1.0}
+      SESSIONS_ACTION_PIDS: ${SESSIONS_ACTION_PIDS:-256}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SESSIONS_PRIVATE_RUNNER_ROOT:-/var/lib/sessions-private-runner}:${SESSIONS_PRIVATE_RUNNER_ROOT:-/var/lib/sessions-private-runner}
+    group_add:
+      - ${DOCKER_GID:?Set DOCKER_GID to the host docker.sock group id}
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
