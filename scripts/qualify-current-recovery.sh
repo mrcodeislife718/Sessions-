@@ -22,10 +22,18 @@ fi
 
 test -s "$backup" || { echo 'Current recovery dump is empty' >&2; exit 1; }
 
-admin_url="$(printf '%s' "$DATABASE_URL" | sed -E "s#/[^/?]+([?].*)?$#/postgres\1#")"
+# Preserve any connection query parameters while replacing only the database path.
+# Shell parameter expansion avoids sed delimiter/escaping bugs in PostgreSQL URLs.
+connection_base="${DATABASE_URL%%\?*}"
+connection_query=""
+if [[ "$DATABASE_URL" == *\?* ]]; then connection_query="?${DATABASE_URL#*\?}"; fi
+connection_prefix="${connection_base%/*}"
+[[ "$connection_prefix" != "$connection_base" ]] || { echo 'DATABASE_URL must include a database path' >&2; exit 1; }
+admin_url="${connection_prefix}/postgres${connection_query}"
+restore_url="${connection_prefix}/${restore_db}${connection_query}"
+
 echo "[sessions-current-recovery] creating isolated restore database $restore_db"
 psql "$admin_url" -v ON_ERROR_STOP=1 -c "create database \"$restore_db\"" >/dev/null
-restore_url="$(printf '%s' "$DATABASE_URL" | sed -E "s#/[^/?]+([?].*)?$#/$restore_db\1#")"
 
 if command -v pg_restore >/dev/null 2>&1 && [[ "$(pg_restore --version | awk '{print $NF}' | cut -d. -f1)" == "$server_major" ]]; then
   pg_restore --dbname="$restore_url" --no-owner --no-privileges "$backup"
