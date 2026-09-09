@@ -46,23 +46,12 @@ jobs:
         run: corepack enable && corepack prepare pnpm@10.15.0 --activate
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Apply complete production schema
+      - name: Apply complete canonical production schema
         run: |
-          for migration in \
-            infrastructure/postgres/init.sql \
-            infrastructure/postgres/002-hosted-repositories.sql \
-            infrastructure/postgres/003-source-storage.sql \
-            infrastructure/postgres/004-production-controls.sql \
-            infrastructure/postgres/005-commercial-operations.sql \
-            infrastructure/postgres/006-product-analytics.sql \
-            infrastructure/postgres/007-billing-integrations.sql \
-            infrastructure/postgres/008-repository-collaboration.sql \
-            infrastructure/postgres/009-lifecycle-evidence-events.sql \
-            infrastructure/postgres/010-hosted-auth.sql \
-            infrastructure/postgres/011-repository-onboarding.sql \
-            infrastructure/postgres/012-sessions-native-repository.sql; do
+          while IFS= read -r migration; do
+            echo "Applying ${migration}"
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
-          done
+          done < <(bash scripts/list-migrations.sh)
       - name: Seed native local workspace
         run: |
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
