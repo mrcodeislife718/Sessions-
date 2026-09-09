@@ -14,11 +14,11 @@ function days(value:unknown,label:string,min:number,max=3650){const n=Number(val
 function iso(value:string|null,label:string){if(!value)return null;const date=new Date(value);if(Number.isNaN(date.getTime()))throw new EnterpriseGovernanceError(400,`${label} must be an ISO-8601 timestamp`);return date.toISOString()}
 function canonical(value:unknown):string{if(value===null||typeof value!=="object")return JSON.stringify(value);if(Array.isArray(value))return `[${value.map(canonical).join(",")}]`;const object=value as Record<string,unknown>;return `{${Object.keys(object).sort().map(k=>`${JSON.stringify(k)}:${canonical(object[k])}`).join(",")}}`}
 function encodeCursor(row:any){return Buffer.from(JSON.stringify([row.occurred_at,row.id])).toString("base64url")}
-function decodeCursor(value:string|null){if(!value)return null;try{const parsed=JSON.parse(Buffer.from(value,"base64url").toString("utf8"));if(!Array.isArray(parsed)||parsed.length!==2||typeof parsed[0]!=="string"||typeof parsed[1]!=="string")throw new Error();const timestamp=iso(parsed[0],"cursor");return[timestamp,parsed[1]] as const}catch{throw new EnterpriseGovernanceError(400,"invalid audit export cursor")}}
+function decodeCursor(value:string|null){if(!value)return null;try{const parsed=JSON.parse(Buffer.from(value,"base64url").toString("utf8"));if(!Array.isArray(parsed)||parsed.length!==2||typeof parsed[0]!=="string"||typeof parsed[1]!=="string"||!parsed[0]||!parsed[1])throw new Error();const timestamp=iso(parsed[0],"cursor");if(!timestamp)throw new Error();return[timestamp,parsed[1]] as const}catch{throw new EnterpriseGovernanceError(400,"invalid audit export cursor")}}
 async function audit(c:Context,action:string,organizationId:string,metadata:Record<string,unknown>){await c.pool.query("insert into audit_events(id,workspace_id,principal_id,action,resource_type,resource_id,outcome,metadata) values($1,$2,$3,$4,'organization',$5,'allowed',$6)",[`audit_${randomUUID()}`,c.identity.workspaceId,c.identity.principalId,action,organizationId,JSON.stringify(metadata)])}
 
 async function exportAudit(c:Context,admin:Authority){
-  const limit=Math.min(1000,Math.max(1,Number(c.url.searchParams.get("limit")??250)||250));
+  const requested=Number(c.url.searchParams.get("limit")??250);if(!Number.isInteger(requested)||requested<1||requested>1000)throw new EnterpriseGovernanceError(400,"limit must be an integer from 1 to 1000");const limit=requested;
   const from=iso(c.url.searchParams.get("from"),"from"),to=iso(c.url.searchParams.get("to"),"to");
   if(from&&to&&new Date(from).getTime()>new Date(to).getTime())throw new EnterpriseGovernanceError(400,"from must not be after to");
   const action=c.url.searchParams.get("action")?.trim()||null,outcome=c.url.searchParams.get("outcome")?.trim()||null;
@@ -37,9 +37,27 @@ async function exportAudit(c:Context,admin:Authority){
   c.send(200,{manifest:{...manifest,sha256,algorithm:"sha256",canonicalization:"sessions-canonical-json-v1"},events});
 }
 
+async function retentionSweep(c:Context,admin:Authority){
+  const b=await c.body();if(String(b.confirmOrganizationId??"")!==admin.organization_id)throw new EnterpriseGovernanceError(400,"confirmOrganizationId must exactly match the organization id");
+  const policy=(await c.pool.query("select * from organization_retention_policies where organization_id=$1",[admin.organization_id])).rows[0];if(!policy)throw new EnterpriseGovernanceError(409,"configure an organization retention policy before executing retention");if(policy.legal_hold)throw new EnterpriseGovernanceError(409,"retention deletion is blocked by organization legal hold");
+  const batch=Number(b.batchSize??1000);if(!Number.isInteger(batch)||batch<1||batch>10000)throw new EnterpriseGovernanceError(400,"batchSize must be an integer from 1 to 10000");
+  const client=await c.pool.connect();const deleted={auditEvents:0,productEvents:0,webhookEvents:0,lifecycleEvents:0};
+  try{await client.query("begin");
+    const auditRows=await client.query(`with doomed as (select a.id from audit_events a join workspaces w on w.id=a.workspace_id where w.organization_id=$1 and a.occurred_at<now()-($2::text||' days')::interval order by a.occurred_at asc limit $3) delete from audit_events a using doomed d where a.id=d.id`,[admin.organization_id,policy.audit_retention_days,batch]);deleted.auditEvents=auditRows.rowCount??0;
+    const productRows=await client.query(`with doomed as (select p.id from product_events p join workspaces w on w.id=p.workspace_id where w.organization_id=$1 and p.occurred_at<now()-($2::text||' days')::interval order by p.occurred_at asc limit $3) delete from product_events p using doomed d where p.id=d.id`,[admin.organization_id,policy.product_event_retention_days,batch]);deleted.productEvents=productRows.rowCount??0;
+    const webhookRows=await client.query(`with doomed as (select e.id from webhook_events e join workspaces w on w.id=e.workspace_id where w.organization_id=$1 and e.occurred_at<now()-($2::text||' days')::interval order by e.occurred_at asc limit $3) delete from webhook_events e using doomed d where e.id=d.id`,[admin.organization_id,policy.webhook_retention_days,batch]);deleted.webhookEvents=webhookRows.rowCount??0;
+    const lifecycleRows=await client.query(`with doomed as (select e.id from repository_lifecycle_events e join workspaces w on w.id=e.workspace_id where w.organization_id=$1 and e.occurred_at<now()-($2::text||' days')::interval order by e.occurred_at asc limit $3) delete from repository_lifecycle_events e using doomed d where e.id=d.id`,[admin.organization_id,policy.lifecycle_retention_days,batch]);deleted.lifecycleEvents=lifecycleRows.rowCount??0;
+    await client.query("commit");
+  }catch(error){await client.query("rollback");throw error}finally{client.release()}
+  await audit(c,"organization.retention_sweep",admin.organization_id,{batchSize:batch,deleted,policy:{auditRetentionDays:policy.audit_retention_days,productEventRetentionDays:policy.product_event_retention_days,webhookRetentionDays:policy.webhook_retention_days,lifecycleRetentionDays:policy.lifecycle_retention_days}});c.send(200,{organizationId:admin.organization_id,legalHold:false,batchSize:batch,deleted});
+}
+
 export async function handleEnterpriseGovernance(c:Context):Promise<boolean>{
   if(c.url.pathname==="/api/organization/audit-export"){
     if(c.req.method!=="GET")throw new EnterpriseGovernanceError(405,"method not allowed");scope(c.identity,"sessions:read");const admin=await enterpriseHumanAdmin(c);await exportAudit(c,admin);return true;
+  }
+  if(c.url.pathname==="/api/organization/retention-sweep"){
+    if(c.req.method!=="POST")throw new EnterpriseGovernanceError(405,"method not allowed");scope(c.identity,"sessions:write");const admin=await enterpriseHumanAdmin(c);await retentionSweep(c,admin);return true;
   }
   if(c.url.pathname!=="/api/organization/retention-policy")return false;
   scope(c.identity,c.req.method==="GET"?"sessions:read":"sessions:write");const admin=await enterpriseHumanAdmin(c);
