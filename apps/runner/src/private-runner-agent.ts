@@ -78,7 +78,7 @@ function redact(text: string, secretValues: Record<string, string>) {
   return output;
 }
 
-function bounded(buffer: Buffer, chunk: Buffer) {
+function bounded(buffer: Buffer<ArrayBufferLike>, chunk: Buffer<ArrayBufferLike>): Buffer<ArrayBufferLike> {
   if (buffer.length >= maxLogBytes) return buffer;
   return Buffer.concat([buffer, chunk.subarray(0, maxLogBytes - buffer.length)]);
 }
@@ -133,7 +133,7 @@ async function execute(job: Job, check: Check, source: string, secretValues: Rec
   for (const [name, value] of Object.entries(secretValues)) args.push("--env", `${name}=${value}`);
   args.push(check.container_image, ...check.command_argv);
 
-  let output = Buffer.alloc(0);
+  let output: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let timedOut = false;
   const started = Date.now();
   const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
