@@ -1,3 +1,6 @@
+import type { RuntimeFingerprint } from "./runtime-fingerprint.js";
+export * from "./runtime-fingerprint.js";
+
 export type ActorKind = "human" | "ai_agent" | "ai_system" | "service";
 
 export interface ActorIdentity {
@@ -26,6 +29,7 @@ export type ExecutionEventType =
   | "TaskCreated"
   | "WorkerAssigned"
   | "ProviderSessionBound"
+  | "ExecutionEnvironmentCaptured"
   | "AuthorityEvaluated"
   | "WorktreeCreated"
   | "FilesInspected"
@@ -121,6 +125,7 @@ export interface ExecutionLineagePayload {
   provider?: string;
   model?: string;
   role?: string;
+  runtimeFingerprint?: RuntimeFingerprint;
   authorityDecision?: "allowed" | "denied" | "approval_required";
   approvalId?: string;
   commandClass?: string;
@@ -177,7 +182,7 @@ export function createDecisionEvent(
 }
 
 const taskRequired = new Set<ExecutionEventType>([
-  "TaskCreated", "WorkerAssigned", "ProviderSessionBound", "AuthorityEvaluated", "WorktreeCreated", "FilesInspected",
+  "TaskCreated", "WorkerAssigned", "ProviderSessionBound", "ExecutionEnvironmentCaptured", "AuthorityEvaluated", "WorktreeCreated", "FilesInspected",
   "PatchProposed", "PatchApproved", "TestExecuted", "ReviewPassed", "ReviewFailed", "CommitCreated", "RepairStarted",
   "RepairCompleted", "TaskCompleted", "TaskFailed",
 ]);
@@ -189,6 +194,7 @@ export function createExecutionEvent(
   if (taskRequired.has(input.type) && !payload.taskId?.trim()) throw new Error(`${input.type} requires payload.taskId`);
   if ((input.type === "WorkerAssigned" || input.type === "ProviderSessionBound") && !payload.logicalWorkerId?.trim()) throw new Error(`${input.type} requires payload.logicalWorkerId`);
   if (input.type === "ProviderSessionBound" && !payload.providerSessionId?.trim()) throw new Error("ProviderSessionBound requires payload.providerSessionId");
+  if (input.type === "ExecutionEnvironmentCaptured" && !payload.runtimeFingerprint?.digest?.trim()) throw new Error("ExecutionEnvironmentCaptured requires payload.runtimeFingerprint");
   if (input.type === "AuthorityEvaluated" && !payload.authorityDecision) throw new Error("AuthorityEvaluated requires payload.authorityDecision");
   if (input.type === "WorktreeCreated" && !payload.worktree?.trim()) throw new Error("WorktreeCreated requires payload.worktree");
   if (input.type === "CommitCreated" && !payload.commitSha?.trim()) throw new Error("CommitCreated requires payload.commitSha");
