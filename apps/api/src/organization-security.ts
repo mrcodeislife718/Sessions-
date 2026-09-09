@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { Pool } from "pg";
+import { handleEnterpriseGovernance } from "./enterprise-governance.js";
 
 type Identity={workspaceId:string;principalId:string;scopes:string[]};
 type Context={pool:Pool;identity:Identity;req:IncomingMessage;url:URL;body:()=>Promise<any>;send:(status:number,body:unknown)=>void};
@@ -13,6 +14,7 @@ function names(value:unknown,label:string){if(!Array.isArray(value)||value.lengt
 function count(value:unknown,label:string,fallback:number){const n=Number(value??fallback);if(!Number.isInteger(n)||n<0||n>100)throw new OrganizationSecurityError(400,`${label} must be an integer from 0 to 100`);return n}
 
 export async function handleOrganizationSecurity(c:Context):Promise<boolean>{
+  if(await handleEnterpriseGovernance(c))return true;
   if(c.url.pathname!=="/api/organization/security-policy")return false;
   scope(c.identity,c.req.method==="GET"?"sessions:read":"sessions:write");const authorityRow=await authority(c);
   if(c.req.method==="GET"){const r=await c.pool.query("select * from organization_security_policies where organization_id=$1",[authorityRow.organization_id]);c.send(200,r.rows[0]??{organizationId:authorityRow.organization_id,configured:false});return true}
