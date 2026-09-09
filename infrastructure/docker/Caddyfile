@@ -20,6 +20,16 @@
     reverse_proxy repositories:4300
   }
 
+  @privateRunnerControl path /api/private-runners /api/private-runners/* /api/private-runner/*
+  handle @privateRunnerControl {
+    reverse_proxy private-runners:4600
+  }
+
+  @repositoryRunnerPolicy path_regexp repositoryRunnerPolicy ^/api/repositories/[^/]+/runner-policy$
+  handle @repositoryRunnerPolicy {
+    reverse_proxy private-runners:4600
+  }
+
   # Repository administration and legacy migration are isolated behind the
   # repository control service. Normal native repository data paths remain on
   # the first-party Sessions API.
