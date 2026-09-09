@@ -15,8 +15,8 @@
     reverse_proxy auth:4200
   }
 
-  @organizationSecurity path /api/organization/security-policy
-  handle @organizationSecurity {
+  @organizationControl path /api/organization/*
+  handle @organizationControl {
     reverse_proxy repositories:4300
   }
 
