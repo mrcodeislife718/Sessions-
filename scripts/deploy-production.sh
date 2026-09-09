@@ -9,6 +9,7 @@ compose=(docker compose -f docker-compose.production.yml)
 : "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
 : "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}"
 : "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+: "${SESSIONS_ACTION_SECRET_KEY:?SESSIONS_ACTION_SECRET_KEY is required}"
 : "${SESSIONS_WEBHOOK_MASTER_KEY:?SESSIONS_WEBHOOK_MASTER_KEY is required}"
 : "${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required}"
 : "${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET is required}"
@@ -25,7 +26,7 @@ echo "[sessions] creating pre-deploy database backup"
 SESSIONS_BACKUP_DIR="$backup_dir" bash scripts/backup-production.sh
 
 echo "[sessions] building Sessions release $release_id"
-"${compose[@]}" build --pull api auth billing repositories workflows webhooks webhook-worker web runner executor
+"${compose[@]}" build --pull api auth billing repositories workflows private-runners webhooks webhook-worker web runner executor
 
 echo "[sessions] starting data services"
 "${compose[@]}" up -d postgres redis minio
@@ -37,17 +38,18 @@ for migration in "${migrations[@]}"; do
 done
 
 echo "[sessions] rolling application services"
-"${compose[@]}" up -d --no-deps api auth billing repositories workflows webhooks webhook-worker runner executor
+"${compose[@]}" up -d --no-deps api auth billing repositories workflows private-runners webhooks webhook-worker runner executor
 "${compose[@]}" up -d --no-deps web
 "${compose[@]}" up -d --no-deps proxy
 
 for i in $(seq 1 60); do
-  api_ok=0; billing_ok=0; auth_ok=0; repositories_ok=0; workflows_ok=0; webhooks_ok=0; webhook_worker_ok=0; executor_ok=0
+  api_ok=0; billing_ok=0; auth_ok=0; repositories_ok=0; workflows_ok=0; private_runners_ok=0; webhooks_ok=0; webhook_worker_ok=0; executor_ok=0
   if curl --fail --silent --show-error "https://${SESSIONS_DOMAIN}/ready" >/dev/null; then api_ok=1; fi
   billing_code="$(curl -s -o /dev/null -w '%{http_code}' "https://${SESSIONS_DOMAIN}/api/billing/subscription" || true)"
   auth_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' --data '{}' "https://${SESSIONS_DOMAIN}/api/auth/login" || true)"
   repositories_code="$("${compose[@]}" exec -T repositories sh -c 'wget -q -O - http://127.0.0.1:4300/health >/dev/null && printf 200' 2>/dev/null || true)"
   workflows_code="$("${compose[@]}" exec -T workflows sh -c 'wget -q -O - http://127.0.0.1:4400/health >/dev/null && printf 200' 2>/dev/null || true)"
+  private_runners_code="$("${compose[@]}" exec -T private-runners sh -c 'wget -q -O - http://127.0.0.1:4600/health >/dev/null && printf 200' 2>/dev/null || true)"
   webhooks_code="$("${compose[@]}" exec -T webhooks sh -c 'wget -q -O - http://127.0.0.1:4500/health >/dev/null && printf 200' 2>/dev/null || true)"
   if "${compose[@]}" ps --status running webhook-worker | grep -q webhook-worker; then webhook_worker_ok=1; fi
   if "${compose[@]}" ps --status running executor | grep -q executor; then executor_ok=1; fi
@@ -55,8 +57,9 @@ for i in $(seq 1 60); do
   if [[ "$auth_code" == 400 || "$auth_code" == 401 || "$auth_code" == 422 ]]; then auth_ok=1; fi
   if [[ "$repositories_code" == 200 ]]; then repositories_ok=1; fi
   if [[ "$workflows_code" == 200 ]]; then workflows_ok=1; fi
+  if [[ "$private_runners_code" == 200 ]]; then private_runners_ok=1; fi
   if [[ "$webhooks_code" == 200 ]]; then webhooks_ok=1; fi
-  if [[ "$api_ok" == 1 && "$billing_ok" == 1 && "$auth_ok" == 1 && "$repositories_ok" == 1 && "$workflows_ok" == 1 && "$webhooks_ok" == 1 && "$webhook_worker_ok" == 1 && "$executor_ok" == 1 ]]; then
+  if [[ "$api_ok" == 1 && "$billing_ok" == 1 && "$auth_ok" == 1 && "$repositories_ok" == 1 && "$workflows_ok" == 1 && "$private_runners_ok" == 1 && "$webhooks_ok" == 1 && "$webhook_worker_ok" == 1 && "$executor_ok" == 1 ]]; then
     printf '%s\n' "$release_id" > .sessions-last-good-release
     echo "[sessions] deployment healthy: $release_id"
     exit 0
