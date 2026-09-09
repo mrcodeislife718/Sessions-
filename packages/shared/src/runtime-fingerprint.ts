@@ -37,6 +37,11 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
+function fields(value: RuntimeFingerprint): Record<string, unknown> {
+  const { digest: _digest, ...rest } = value;
+  return rest;
+}
+
 export function createRuntimeFingerprint(input: RuntimeFingerprintInput): RuntimeFingerprint {
   const normalized: RuntimeFingerprintInput = {
     ...structuredClone(input),
@@ -49,9 +54,10 @@ export function createRuntimeFingerprint(input: RuntimeFingerprintInput): Runtim
 
 export function compareRuntimeFingerprints(a: RuntimeFingerprint, b: RuntimeFingerprint): { equivalent: boolean; differences: string[] } {
   if (a.digest === b.digest) return { equivalent: true, differences: [] };
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-  keys.delete("digest");
-  const differences = [...keys].filter((key) => JSON.stringify(canonicalize((a as Record<string, unknown>)[key])) !== JSON.stringify(canonicalize((b as Record<string, unknown>)[key]))).sort();
+  const left = fields(a);
+  const right = fields(b);
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  const differences = [...keys].filter((key) => JSON.stringify(canonicalize(left[key])) !== JSON.stringify(canonicalize(right[key]))).sort();
   return { equivalent: differences.length === 0, differences };
 }
 
