@@ -15,7 +15,7 @@
     reverse_proxy auth:4200
   }
 
-  @organizationControl path /api/organization/*
+  @organizationControl path /api/organization/security-policy /api/organization/audit-export /api/organization/retention-policy /api/organization/retention-sweep
   handle @organizationControl {
     reverse_proxy repositories:4300
   }
