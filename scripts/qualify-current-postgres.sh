@@ -8,7 +8,8 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # qualified database through the exact same canonical migration set used by deploy.
 bash "$root/scripts/qualify-postgres.sh"
 
-mapfile -t migrations < <("$root/scripts/list-migrations.sh")
+mapfile -t migrations < <(bash "$root/scripts/list-migrations.sh")
+[[ "${#migrations[@]}" -gt 0 ]] || { echo 'Canonical migration list is empty' >&2; exit 1; }
 for migration in "${migrations[@]}"; do
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
 done
